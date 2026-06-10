@@ -1,0 +1,6 @@
+# Sample names file for email_enum.py
+# One full name per line — comments starting with # are ignored
+
+John Doe
+Jane Smith
+Michael Johnson
