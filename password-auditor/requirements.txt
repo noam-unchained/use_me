@@ -1,3 +1,0 @@
-# No external dependencies required
-# Uses Python 3 standard library only:
-# re, sys, math, argparse, collections, datetime, pathlib
