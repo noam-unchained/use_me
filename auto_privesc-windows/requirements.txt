@@ -1,5 +1,0 @@
-# No external dependencies required
-# All libraries used are Python 3 built-ins:
-# os, sys, subprocess, argparse, winreg, ctypes, datetime
-#
-# Note: winreg is Windows-only — this script will not run on Linux/macOS
