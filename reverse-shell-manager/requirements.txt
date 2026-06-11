@@ -1,0 +1,3 @@
+# No external dependencies required
+# Uses Python 3 standard library only:
+# socket, select, sys, os, threading, argparse, readline, time, datetime, queue
