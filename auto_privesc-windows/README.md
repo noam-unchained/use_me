@@ -74,6 +74,12 @@ python autoprivesc_win.py --report
 
 ## Usage — PowerShell Version
 
+Before running, allow script execution:
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+```
+
 ```powershell
 :: Full scan + auto-exploit (default)
 powershell -ep bypass -f AutoPrivEsc.ps1
