@@ -1,1 +1,1 @@
-Some tools i created using Claude code for my personal usage, feel free to use!
+Some tools I created using Claude Code for my personal use. Feel free to use them!
