@@ -1,0 +1,11 @@
+# Sample URLs for batch testing
+# One URL per line — comments starting with # are ignored
+
+# Suspicious
+http://paypal.com.verify-account.tk/login
+http://192.168.1.1/secure/login.php
+https://apple-id-verify.xyz/update
+
+# Likely safe
+https://google.com
+https://github.com
