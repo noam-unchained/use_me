@@ -14,3 +14,4 @@ This phase feeds directly into scanning and exploitation — subdomains become t
 | [whois-lookup](whois-lookup/) | Pull registration data for domains |
 | [email-enum](email-enum/) | Enumerate valid email addresses for a domain |
 | [subdomain-enum](subdomain-enum/) | Discover subdomains via DNS brute-force |
+| [web-scraper-downloader](web-scraper-downloader/) | Scrape a target site for links, images, and PDF files |

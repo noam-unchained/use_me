@@ -12,3 +12,4 @@ Nothing here is phase-specific — these are things you reach for throughout an 
 | [hash-cracker](hash-cracker/) | Crack hashes using wordlists and brute-force |
 | [password-auditor](password-auditor/) | Audit password strength and check against common lists |
 | [log-cleaner](log-cleaner/) | Clear system logs and shell history to remove traces |
+| [phishing-detector](phishing-detector/) | Analyze a URL and score its phishing risk (0–100) |
