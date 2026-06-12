@@ -1,12 +1,12 @@
-# 🎣 Phishing Page Detector — URL Risk Analyzer
+# Phishing Page Detector — URL Risk Analyzer
 
 A Python tool that analyzes any URL and returns a **risk score (0–100)** with a detailed breakdown of exactly why it's suspicious — covering domain analysis, SSL, HTML content, brand impersonation, and more.
 
-> ⚠️ For educational and security research use only.
+> ️ For educational and security research use only.
 
 ---
 
-## 🚀 What It Does
+## What It Does
 
 Runs 6 independent checks against a URL and combines their scores into a final risk verdict:
 
@@ -47,7 +47,7 @@ Submit the URL to VirusTotal's database and check how many security vendors flag
 
 ---
 
-## 🛠️ Installation
+## ️ Installation
 
 ```bash
 git clone https://github.com/noam-unchained/phishing-detector.git
@@ -81,61 +81,61 @@ python phishing_detector.py -f sample_urls.txt
 
 ---
 
-## 📸 Example Output
+## Example Output
 
 ```
 ════════════════════════════════════════════════════════════
-  Analyzing: http://paypal.com.verify-account.tk/login
+Analyzing: http://paypal.com.verify-account.tk/login
 ════════════════════════════════════════════════════════════
 
-  [+] Page loaded — status 200 (8,432 bytes)
-  [*] Running checks...
+[+] Page loaded — status 200 (8,432 bytes)
+[*] Running checks...
 
-  ──────────────────────────────────────────────────────────
-  1. URL Structure
-  2. Domain Age (WHOIS)
-  3. SSL Certificate
-  4. HTML Content
-  5. Domain Entropy
-  ──────────────────────────────────────────────────────────
+──────────────────────────────────────────────────────────
+1. URL Structure
+2. Domain Age (WHOIS)
+3. SSL Certificate
+4. HTML Content
+5. Domain Entropy
+──────────────────────────────────────────────────────────
 
 ════════════════════════════════════════════════════════════
-  RISK REPORT
+RISK REPORT
 ════════════════════════════════════════════════════════════
 
-  ⚠ Risk Indicators:
-  + 40  ████████  'paypal.com' appears as subdomain of another domain
-  + 35  ███████   Form submits credentials to different domain
-  + 20  ████      Suspicious TLD '.tk'
-  + 20  ████      Domain is only 3 days old
-  + 20  ████      Page contains 1 password input field
-  + 15  ███       Page disables right-click
-  + 10  ██        Free SSL certificate (Let's Encrypt)
+Risk Indicators:
++ 40 ████████ 'paypal.com' appears as subdomain of another domain
++ 35 ███████ Form submits credentials to different domain
++ 20 ████ Suspicious TLD '.tk'
++ 20 ████ Domain is only 3 days old
++ 20 ████ Page contains 1 password input field
++ 15 ███ Page disables right-click
++ 10 ██ Free SSL certificate (Let's Encrypt)
 
-  ✓ Safe Indicators:
-        ✓  Uses a domain name (not raw IP)
+Safe Indicators:
+Uses a domain name (not raw IP)
 
 ────────────────────────────────────────────────────────────
-  Risk Score : 100/100
-  Verdict    : 🚨 HIGH RISK — Likely Phishing
+Risk Score : 100/100
+Verdict : HIGH RISK — Likely Phishing
 ════════════════════════════════════════════════════════════
 ```
 
 ---
 
-## 📁 File Structure
+## File Structure
 
 ```
 phishing-detector/
-├── phishing_detector.py   # Main analyzer
-├── sample_urls.txt        # Sample URLs for batch testing
-├── requirements.txt       # Dependencies
+├── phishing_detector.py # Main analyzer
+├── sample_urls.txt # Sample URLs for batch testing
+├── requirements.txt # Dependencies
 └── README.md
 ```
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
 
 | Library | Purpose |
 |---|---|
@@ -147,7 +147,7 @@ phishing-detector/
 
 ---
 
-## 📚 Key Concepts
+## Key Concepts
 
 **Why is HTTPS not enough?**
 Phishers routinely use free SSL certificates (Let's Encrypt) to make their sites appear legitimate. The padlock icon only means the connection is encrypted — not that the site is safe.
@@ -160,7 +160,7 @@ A measure of randomness in a string. Legitimate domains like `google.com` have l
 
 ---
 
-## 🔮 Possible Extensions
+## Possible Extensions
 
 - [ ] Browser extension version
 - [ ] Telegram/Slack bot integration
@@ -170,12 +170,12 @@ A measure of randomness in a string. Legitimate domains like `google.com` have l
 
 ---
 
-## ⚠️ Disclaimer
+## ️ Disclaimer
 
 For educational and authorized security research only.
 
 ---
 
-## 📄 License
+## License
 
 MIT

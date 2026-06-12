@@ -1,12 +1,12 @@
-# 🔍 Subdomain Enumeration Tool
+# Subdomain Enumeration Tool
 
 A Bash script that automates subdomain discovery by running three tools in sequence — **Subfinder**, **Assetfinder**, and **Sublist3r** — then merges and deduplicates all results into a single clean file.
 
-> ⚠️ **For educational and authorized use only.** Only run against domains you own or have explicit permission to test.
+> ️ **For educational and authorized use only.** Only run against domains you own or have explicit permission to test.
 
 ---
 
-## 🚀 What It Does
+## What It Does
 
 1. **Normalizes the input** — strips protocol and path, works with both `example.com` and `https://example.com/anything`
 2. **Checks tool availability** — warns if a tool is missing instead of crashing
@@ -17,7 +17,7 @@ A Bash script that automates subdomain discovery by running three tools in seque
 
 ---
 
-## 🛠️ Requirements
+## ️ Requirements
 
 Install the required tools:
 
@@ -46,41 +46,41 @@ chmod +x subdomain_enum.sh
 **Example output:**
 ```
 ═══════════════════════════════════════════
-   Subdomain Enumeration — example.com
+Subdomain Enumeration — example.com
 ═══════════════════════════════════════════
 
 [+] Running Subfinder...
-    └── Found 43 subdomains
+└── Found 43 subdomains
 [+] Running Assetfinder...
-    └── Found 31 subdomains
+└── Found 31 subdomains
 [+] Running Sublist3r...
-    └── Found 27 subdomains
+└── Found 27 subdomains
 
 [*] Merging and deduplicating results...
 
 ═══════════════════════════════════════════
-   Done!
-   Total unique subdomains: 58
-   Results saved to: example.com/recon/subs.txt
+Done!
+Total unique subdomains: 58
+Results saved to: example.com/recon/subs.txt
 ═══════════════════════════════════════════
 ```
 
 ---
 
-## 📁 Output Structure
+## Output Structure
 
 ```
 example.com/
 └── recon/
-    ├── subfinder.txt      # Raw results from Subfinder
-    ├── assetfinder.txt    # Raw results from Assetfinder
-    ├── sublist3r.txt      # Raw results from Sublist3r
-    └── subs.txt           # Final merged & deduplicated list
+├── subfinder.txt # Raw results from Subfinder
+├── assetfinder.txt # Raw results from Assetfinder
+├── sublist3r.txt # Raw results from Sublist3r
+└── subs.txt # Final merged & deduplicated list
 ```
 
 ---
 
-## 🔮 Possible Extensions
+## Possible Extensions
 
 - [ ] Add `httpx` to probe which subdomains are alive
 - [ ] Add `--threads` flag for parallel tool execution
@@ -89,12 +89,12 @@ example.com/
 
 ---
 
-## ⚠️ Disclaimer
+## ️ Disclaimer
 
 This tool is for **educational use** in authorized penetration testing and bug bounty environments only.
 
 ---
 
-## 📄 License
+## License
 
 MIT

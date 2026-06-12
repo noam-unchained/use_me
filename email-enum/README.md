@@ -1,12 +1,12 @@
-# 📧 Email Enumeration Tool — OSINT & Recon
+# Email Enumeration Tool — OSINT & Recon
 
 A Python-based OSINT tool that generates corporate email address permutations for a target person and verifies which ones are valid using SMTP — without sending a single email.
 
-> ⚠️ **For educational and authorized use only.** Only use against domains you own or have explicit permission to test.
+> ️ **For educational and authorized use only.** Only use against domains you own or have explicit permission to test.
 
 ---
 
-## 🚀 What It Does
+## What It Does
 
 ### Step 1 — Pattern Generation
 Given a full name and domain, generates all common corporate email formats:
@@ -41,7 +41,7 @@ Prints a clean results table and highlights all valid addresses found.
 
 ---
 
-## 🛠️ Installation
+## ️ Installation
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/email-enum.git
@@ -75,12 +75,12 @@ python email_enum.py -d company.com -n "John Doe" --delay 2
 
 ---
 
-## 📸 Example Output
+## Example Output
 
 ```
 ═══════════════════════════════════════════════════════
-  Target  : John Doe
-  Domain  : company.com
+Target : John Doe
+Domain : company.com
 ═══════════════════════════════════════════════════════
 
 [*] Generated 14 email patterns
@@ -89,39 +89,39 @@ python email_enum.py -d company.com -n "John Doe" --delay 2
 
 [*] Starting SMTP verification...
 
-  Email                                    Status
-  ────────────────────────────────────── ──────────
-  john.doe@company.com                   ✓  VALID
-  johndoe@company.com                    ✗  INVALID
-  jdoe@company.com                       ✗  INVALID
-  johnd@company.com                      ✗  INVALID
-  j.doe@company.com                      ✓  VALID
-  ...
+Email Status
+────────────────────────────────────── ──────────
+john.doe@company.com VALID
+johndoe@company.com INVALID
+jdoe@company.com INVALID
+johnd@company.com INVALID
+j.doe@company.com VALID
+...
 
 ═══════════════════════════════════════════════════════
-  Done! 2 valid address(es) found out of 14
+Done! 2 valid address(es) found out of 14
 
-  Valid addresses:
-    → john.doe@company.com
-    → j.doe@company.com
+Valid addresses:
+→ john.doe@company.com
+→ j.doe@company.com
 ═══════════════════════════════════════════════════════
 ```
 
 ---
 
-## 📁 File Structure
+## File Structure
 
 ```
 email-enum/
-├── email_enum.py     # Main enumeration script
-├── names.txt         # Sample names file for batch mode
-├── requirements.txt  # Python dependencies
+├── email_enum.py # Main enumeration script
+├── names.txt # Sample names file for batch mode
+├── requirements.txt # Python dependencies
 └── README.md
 ```
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
 
 | Library | Purpose |
 |---|---|
@@ -132,7 +132,7 @@ email-enum/
 
 ---
 
-## 📚 Key Concepts
+## Key Concepts
 
 **What is SMTP RCPT TO verification?**
 When you send an email, your mail client connects to the recipient's mail server and says `RCPT TO: <address>`. The server responds with `250` (exists) or `550` (doesn't exist) before any email is actually sent. We exploit this handshake to verify addresses without sending anything.
@@ -145,7 +145,7 @@ A DNS record that tells you which mail server is responsible for receiving email
 
 ---
 
-## 🔮 Possible Extensions
+## Possible Extensions
 
 - [ ] Export results to CSV
 - [ ] Integration with `Hunter.io` API for additional verification
@@ -155,13 +155,13 @@ A DNS record that tells you which mail server is responsible for receiving email
 
 ---
 
-## ⚠️ Disclaimer
+## ️ Disclaimer
 
-This tool is intended for **authorized penetration testing, bug bounty, and educational use only**.  
+This tool is intended for **authorized penetration testing, bug bounty, and educational use only**. 
 Unauthorized email enumeration may violate the Computer Fraud and Abuse Act (CFAA) and equivalent laws.
 
 ---
 
-## 📄 License
+## License
 
 MIT
