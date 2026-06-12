@@ -147,7 +147,7 @@ def run_tshark(source, is_live=False, interface=None, timeout=None):
         print("[!] tshark not found. Install Wireshark/tshark first.")
         sys.exit(1)
 
-    cmd = ["tshark", "-l", "-n", "-T", "fields", "-E", "separator=|", "-E", "occurrence=f"]
+    cmd = ["tshark", "-n", "-T", "fields", "-E", "separator=|", "-E", "occurrence=f", "-E", "quote=n"]
     for f in FIELDS:
         cmd += ["-e", f]
 
@@ -376,7 +376,7 @@ def print_report(output_file=None):
 # ─── Modes ────────────────────────────────────────────────────────────────────
 
 def stream_tshark(cmd, label="packets"):
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
     count = 0
     try:
         for line in proc.stdout:
@@ -389,6 +389,9 @@ def stream_tshark(cmd, label="packets"):
         proc.terminate()
         print("\n[*] Stopped by user")
     proc.wait()
+    stderr_out = proc.stderr.read().strip()
+    if stderr_out and count == 0:
+        print(f"\n[!] tshark error:\n{stderr_out}\n")
     print(f"  {count:,} {label} processed.   ")
     return count
 
