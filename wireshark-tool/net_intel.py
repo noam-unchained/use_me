@@ -6,274 +6,285 @@ import os
 import re
 import json
 import base64
+import subprocess
+import shutil
+import urllib.request
 from collections import defaultdict
 from datetime import datetime
 
-try:
-    import pyshark
-except ImportError:
-    print("[!] pyshark not installed: pip install pyshark")
-    sys.exit(1)
+TSHARK = shutil.which("tshark")
+OUI_CACHE = os.path.join(os.path.dirname(__file__), ".oui_cache.txt")
+OUI_URL = "https://www.wireshark.org/download/automated/data/manuf"
 
-# ─── Data stores ─────────────────────────────────────────────────────────────
+# ─── OUI database ─────────────────────────────────────────────────────────────
 
-hosts = {}          # ip -> {mac, hostname, ports, vendor, packets}
-credentials = []    # {protocol, src, dst, user, password, info}
-dns_queries = []    # {src, query, response, type}
-conversations = defaultdict(lambda: {"packets": 0, "bytes": 0})
-suspicious = []
+_oui_db = {}
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+def load_oui():
+    global _oui_db
+    if _oui_db:
+        return
 
-OUI_VENDORS = {
-    "00:50:56": "VMware",
-    "00:0c:29": "VMware",
-    "00:1a:11": "Google",
-    "b8:27:eb": "Raspberry Pi",
-    "dc:a6:32": "Raspberry Pi",
-    "00:1b:21": "Intel",
-    "3c:5a:b4": "Google Chromecast",
-    "ac:de:48": "Apple",
-    "f8:ff:c2": "Apple",
-    "00:17:88": "Philips Hue",
-}
+    if not os.path.exists(OUI_CACHE):
+        print("[*] Downloading OUI database...")
+        try:
+            urllib.request.urlretrieve(OUI_URL, OUI_CACHE)
+            print("[+] OUI database cached\n")
+        except Exception:
+            print("[!] Could not download OUI database, vendor info will be limited\n")
+            return
+
+    with open(OUI_CACHE, "r", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                prefix = parts[0].strip().lower().replace("-", ":")[:8]
+                vendor = parts[2].strip() if len(parts) > 2 else parts[1].strip()
+                _oui_db[prefix] = vendor
 
 def get_vendor(mac):
     if not mac:
-        return "Unknown"
-    prefix = mac[:8].lower().replace("-", ":")
-    for oui, vendor in OUI_VENDORS.items():
-        if prefix.startswith(oui):
-            return vendor
-    return "Unknown"
+        return "-"
+    clean = mac.lower().replace("-", ":").replace(".", ":")
+    if len(clean) < 8:
+        return "-"
+    prefix = clean[:8]
+    return _oui_db.get(prefix, "Unknown")
 
-def register_host(ip, mac=None, hostname=None, port=None):
-    if not ip or ip.startswith("224.") or ip == "255.255.255.255":
+# ─── TTL fingerprinting ────────────────────────────────────────────────────────
+
+def guess_os(ttl):
+    if not ttl:
+        return "-"
+    ttl = int(ttl)
+    if ttl <= 64:
+        return "Linux/Android/iOS/macOS"
+    elif ttl <= 128:
+        return "Windows"
+    elif ttl <= 255:
+        return "Cisco/Network device"
+    return "-"
+
+# ─── Data stores ─────────────────────────────────────────────────────────────
+
+hosts = {}
+credentials = []
+dns_queries = []
+conversations = defaultdict(lambda: {"packets": 0, "bytes": 0})
+suspicious = []
+
+def register_host(ip, mac=None, hostname=None, port=None, ttl=None, user_agent=None, dhcp_vendor=None):
+    if not ip or ip.startswith("224.") or ip in ("255.255.255.255", "0.0.0.0"):
         return
     if ip not in hosts:
-        hosts[ip] = {"mac": None, "hostname": None, "ports": set(), "vendor": "Unknown", "packets": 0}
-    if mac and not hosts[ip]["mac"]:
-        hosts[ip]["mac"] = mac
-        hosts[ip]["vendor"] = get_vendor(mac)
-    if hostname and not hosts[ip]["hostname"]:
-        hosts[ip]["hostname"] = hostname
+        hosts[ip] = {
+            "mac": None, "hostname": None, "ports": set(),
+            "vendor": "-", "os_guess": "-", "user_agent": None,
+            "dhcp_vendor": None, "packets": 0
+        }
+    h = hosts[ip]
+    if mac and not h["mac"]:
+        h["mac"] = mac
+        h["vendor"] = get_vendor(mac)
+    if hostname and not h["hostname"]:
+        h["hostname"] = hostname
     if port:
-        hosts[ip]["ports"].add(port)
-    hosts[ip]["packets"] += 1
+        h["ports"].add(int(port))
+    if ttl and h["os_guess"] == "-":
+        h["os_guess"] = guess_os(ttl)
+    if user_agent and not h["user_agent"]:
+        h["user_agent"] = user_agent[:80]
+    if dhcp_vendor and not h["dhcp_vendor"]:
+        h["dhcp_vendor"] = dhcp_vendor
+    h["packets"] += 1
 
 def flag_suspicious(reason, src, dst, detail=""):
     suspicious.append({"reason": reason, "src": src, "dst": dst, "detail": detail})
 
-# ─── Protocol parsers ─────────────────────────────────────────────────────────
+# ─── tshark field extraction ──────────────────────────────────────────────────
 
-def parse_http(pkt, src, dst):
-    try:
-        http = pkt.http
-        # Basic Auth
-        if hasattr(http, "authorization"):
-            auth = http.authorization
-            if auth.lower().startswith("basic "):
-                try:
-                    decoded = base64.b64decode(auth[6:]).decode("utf-8", errors="ignore")
-                    if ":" in decoded:
-                        user, password = decoded.split(":", 1)
-                        credentials.append({
-                            "protocol": "HTTP Basic Auth",
-                            "src": src, "dst": dst,
-                            "user": user, "password": password,
-                            "info": getattr(http, "request_uri", "")
-                        })
-                except Exception:
-                    pass
+FIELDS = [
+    "frame.number",
+    "ip.src", "ip.dst",
+    "ipv6.src", "ipv6.dst",
+    "eth.src", "eth.dst",
+    "ip.ttl",
+    "frame.len",
+    "tcp.srcport", "tcp.dstport",
+    "udp.srcport", "udp.dstport",
+    "dns.qry.name", "dns.qry.type", "dns.a", "dns.cname",
+    "http.authorization",
+    "http.file_data",
+    "http.request.uri",
+    "http.user_agent",
+    "ftp.request.command", "ftp.request.arg",
+    "smtp.req.command", "smtp.req.parameter",
+    "dhcp.option.hostname", "dhcp.option.vendor_class_id",
+    "bootp.option.hostname",
+    "nbns.name",
+    "mdns.qry.name",
+]
 
-        # POST body with credentials
-        if hasattr(http, "file_data"):
-            body = http.file_data
-            for pattern in [
-                r"(?:user(?:name)?|login|email)[=:]([^&\s]+).*?(?:pass(?:word)?|pwd)[=:]([^&\s]+)",
-                r"(?:pass(?:word)?|pwd)[=:]([^&\s]+).*?(?:user(?:name)?|login|email)[=:]([^&\s]+)",
-            ]:
-                m = re.search(pattern, body, re.IGNORECASE)
-                if m:
-                    credentials.append({
-                        "protocol": "HTTP POST",
-                        "src": src, "dst": dst,
-                        "user": m.group(1), "password": m.group(2),
-                        "info": getattr(http, "request_uri", "")
-                    })
+def run_tshark(source, is_live=False, interface=None, timeout=None):
+    if not TSHARK:
+        print("[!] tshark not found. Install Wireshark/tshark first.")
+        sys.exit(1)
 
-        # Interesting headers
-        if hasattr(http, "cookie") and "session" in http.cookie.lower():
-            flag_suspicious("Session cookie in cleartext HTTP", src, dst, http.cookie[:80])
+    cmd = ["tshark", "-l", "-n", "-T", "fields", "-E", "separator=|", "-E", "occurrence=f"]
+    for f in FIELDS:
+        cmd += ["-e", f]
 
-    except Exception:
-        pass
+    if is_live:
+        cmd += ["-i", interface]
+        if timeout:
+            cmd += ["-a", f"duration:{timeout}"]
+    else:
+        cmd += ["-r", source]
 
-def parse_ftp(pkt, src, dst):
-    try:
-        ftp = pkt.ftp
-        request = getattr(ftp, "request_command", "").upper()
-        arg = getattr(ftp, "request_arg", "")
+    return cmd
 
-        if request == "USER":
-            parse_ftp._pending_user = (src, dst, arg)
-        elif request == "PASS" and hasattr(parse_ftp, "_pending_user"):
-            prev_src, prev_dst, user = parse_ftp._pending_user
-            credentials.append({
-                "protocol": "FTP",
-                "src": prev_src, "dst": prev_dst,
-                "user": user, "password": arg,
-                "info": ""
-            })
-            del parse_ftp._pending_user
-    except Exception:
-        pass
+def parse_line(line):
+    parts = line.strip().split("|")
+    if len(parts) < len(FIELDS):
+        parts += [""] * (len(FIELDS) - len(parts))
 
-parse_ftp._pending_user = None
+    def g(name):
+        try:
+            return parts[FIELDS.index(name)].strip()
+        except (ValueError, IndexError):
+            return ""
 
-def parse_telnet(pkt, src, dst):
-    try:
-        data = pkt.telnet.data if hasattr(pkt.telnet, "data") else ""
-        if data:
-            parse_telnet._buffer[src] = parse_telnet._buffer.get(src, "") + data
-            buf = parse_telnet._buffer[src]
-            m = re.search(r"login:\s*(\S+).*?Password:\s*(\S+)", buf, re.IGNORECASE | re.DOTALL)
-            if m:
-                credentials.append({
-                    "protocol": "Telnet",
-                    "src": src, "dst": dst,
-                    "user": m.group(1), "password": m.group(2),
-                    "info": ""
-                })
-                parse_telnet._buffer[src] = ""
-    except Exception:
-        pass
+    src = g("ip.src") or g("ipv6.src")
+    dst = g("ip.dst") or g("ipv6.dst")
+    mac_src = g("eth.src")
+    mac_dst = g("eth.dst")
+    ttl = g("ip.ttl")
+    length = g("frame.len")
+    tcp_sp = g("tcp.srcport")
+    tcp_dp = g("tcp.dstport")
+    udp_sp = g("udp.srcport")
+    udp_dp = g("udp.dstport")
 
-parse_telnet._buffer = {}
+    dns_name = g("dns.qry.name")
+    dns_type = g("dns.qry.type")
+    dns_a = g("dns.a") or g("dns.cname")
 
-def parse_smtp(pkt, src, dst):
-    try:
-        data = getattr(pkt.smtp, "req_parameter", "") or getattr(pkt.smtp, "message", "")
-        if not data:
-            return
-        if getattr(pkt.smtp, "req_command", "").upper() == "AUTH":
-            parse_smtp._auth_src = src
-        if hasattr(parse_smtp, "_auth_src") and parse_smtp._auth_src == src:
-            try:
-                decoded = base64.b64decode(data).decode("utf-8", errors="ignore")
-                if decoded and len(decoded) > 3:
-                    credentials.append({
-                        "protocol": "SMTP AUTH",
-                        "src": src, "dst": dst,
-                        "user": decoded, "password": "",
-                        "info": "base64 decoded"
-                    })
-            except Exception:
-                pass
-    except Exception:
-        pass
+    http_auth = g("http.authorization")
+    http_body = g("http.file_data")
+    http_uri = g("http.request.uri")
+    http_ua = g("http.user_agent")
 
-parse_smtp._auth_src = None
+    ftp_cmd = g("ftp.request.command").upper()
+    ftp_arg = g("ftp.request.arg")
 
-def parse_dns(pkt, src, dst):
-    try:
-        dns = pkt.dns
-        qname = getattr(dns, "qry_name", None)
-        rdata = getattr(dns, "a", None) or getattr(dns, "cname", None)
-        qtype = getattr(dns, "qry_type", "A")
+    smtp_cmd = g("smtp.req.command").upper()
+    smtp_arg = g("smtp.req.parameter")
 
-        if qname:
-            dns_queries.append({
-                "src": src,
-                "query": qname,
-                "response": rdata or "",
-                "type": qtype
-            })
-            if rdata:
-                register_host(rdata, hostname=qname)
+    dhcp_host = g("dhcp.option.hostname") or g("bootp.option.hostname")
+    dhcp_vendor = g("dhcp.option.vendor_class_id")
 
-            # DNS tunneling heuristic
-            label = qname.split(".")[0] if "." in qname else qname
-            if len(label) > 40:
-                flag_suspicious("Possible DNS tunneling", src, dst, qname)
+    nbns = g("nbns.name")
+    mdns = g("mdns.qry.name")
 
-            # DGA heuristic - high entropy short domain
-            domain_part = ".".join(qname.split(".")[-2:]) if qname.count(".") >= 1 else qname
-            consonants = sum(1 for c in domain_part if c.lower() in "bcdfghjklmnpqrstvwxyz")
-            if len(domain_part) > 6 and consonants / max(len(domain_part), 1) > 0.75:
-                flag_suspicious("Possible DGA domain", src, dst, qname)
+    # Register hosts
+    if src:
+        port = tcp_sp or udp_sp or None
+        register_host(src, mac=mac_src, ttl=ttl, port=port, user_agent=http_ua or None)
+    if dst:
+        port = tcp_dp or udp_dp or None
+        register_host(dst, mac=mac_dst, port=port)
 
-    except Exception:
-        pass
+    # DHCP
+    if dhcp_host and src:
+        register_host(src, hostname=dhcp_host, dhcp_vendor=dhcp_vendor or None)
 
-def parse_dhcp(pkt, src, dst):
-    try:
-        dhcp = pkt.dhcp
-        hostname = getattr(dhcp, "option_hostname", None)
-        mac = getattr(pkt, "eth", None)
-        mac_addr = getattr(mac, "src", None) if mac else None
-        ip = getattr(dhcp, "option_requested_ip", None) or getattr(dhcp, "ip_your", None)
-        if ip:
-            register_host(ip, mac=mac_addr, hostname=hostname)
-    except Exception:
-        pass
+    # NBNS (Windows NetBIOS name)
+    if nbns and src:
+        register_host(src, hostname=nbns.strip().rstrip("\x00"))
 
-def parse_mdns(pkt, src):
-    try:
-        dns = pkt.dns
-        hostname = getattr(dns, "qry_name", None)
-        if hostname and hostname.endswith(".local"):
-            register_host(src, hostname=hostname.replace(".local", ""))
-    except Exception:
-        pass
+    # mDNS
+    if mdns and src and mdns.endswith(".local"):
+        register_host(src, hostname=mdns.replace(".local", ""))
 
-# ─── Packet dispatcher ────────────────────────────────────────────────────────
-
-def process_packet(pkt):
-    try:
-        src = dst = ""
-
-        if hasattr(pkt, "ip"):
-            src = pkt.ip.src
-            dst = pkt.ip.dst
-        elif hasattr(pkt, "ipv6"):
-            src = pkt.ipv6.src
-            dst = pkt.ipv6.dst
-        else:
-            return
-
-        mac_src = getattr(getattr(pkt, "eth", None), "src", None)
-        length = int(pkt.length) if hasattr(pkt, "length") else 0
-
-        register_host(src, mac=mac_src)
-        register_host(dst)
-
+    # Conversations
+    if src and dst:
         key = tuple(sorted([src, dst]))
         conversations[key]["packets"] += 1
-        conversations[key]["bytes"] += length
+        conversations[key]["bytes"] += int(length) if length.isdigit() else 0
 
-        layers = [l.layer_name for l in pkt.layers]
+    # DNS
+    if dns_name:
+        dns_queries.append({"src": src, "query": dns_name, "response": dns_a, "type": dns_type})
+        if dns_a:
+            register_host(dns_a, hostname=dns_name)
+        # DNS tunneling heuristic
+        label = dns_name.split(".")[0] if "." in dns_name else dns_name
+        if len(label) > 40:
+            flag_suspicious("Possible DNS tunneling", src, dst, dns_name)
+        # DGA heuristic
+        if dns_name.count(".") >= 1:
+            domain_part = ".".join(dns_name.split(".")[-2:])
+            consonants = sum(1 for c in domain_part if c.lower() in "bcdfghjklmnpqrstvwxyz")
+            if len(domain_part) > 8 and consonants / max(len(domain_part), 1) > 0.78:
+                flag_suspicious("Possible DGA domain", src, dst, dns_name)
 
-        if "http" in layers:
-            parse_http(pkt, src, dst)
-        if "ftp" in layers:
-            parse_ftp(pkt, src, dst)
-        if "telnet" in layers:
-            parse_telnet(pkt, src, dst)
-        if "smtp" in layers:
-            parse_smtp(pkt, src, dst)
-        if "dns" in layers:
-            if dst == "224.0.0.251":
-                parse_mdns(pkt, src)
-            else:
-                parse_dns(pkt, src, dst)
-        if "dhcp" in layers or "bootp" in layers:
-            parse_dhcp(pkt, src, dst)
+    # HTTP Basic Auth
+    if http_auth and http_auth.lower().startswith("basic "):
+        try:
+            decoded = base64.b64decode(http_auth[6:]).decode("utf-8", errors="ignore")
+            if ":" in decoded:
+                user, password = decoded.split(":", 1)
+                credentials.append({
+                    "protocol": "HTTP Basic Auth", "src": src, "dst": dst,
+                    "user": user, "password": password, "info": http_uri
+                })
+        except Exception:
+            pass
 
-    except Exception:
-        pass
+    # HTTP POST body
+    if http_body:
+        for pattern in [
+            r"(?:user(?:name)?|login|email)[=:]([^&\s]{1,60}).*?(?:pass(?:word)?|pwd)[=:]([^&\s]{1,60})",
+            r"(?:pass(?:word)?|pwd)[=:]([^&\s]{1,60}).*?(?:user(?:name)?|login|email)[=:]([^&\s]{1,60})",
+        ]:
+            m = re.search(pattern, http_body, re.IGNORECASE)
+            if m:
+                credentials.append({
+                    "protocol": "HTTP POST", "src": src, "dst": dst,
+                    "user": m.group(1), "password": m.group(2), "info": http_uri
+                })
 
-# ─── Output / Report ─────────────────────────────────────────────────────────
+    # FTP
+    if ftp_cmd == "USER":
+        parse_line._ftp_user[src] = ftp_arg
+    elif ftp_cmd == "PASS" and src in parse_line._ftp_user:
+        credentials.append({
+            "protocol": "FTP", "src": src, "dst": dst,
+            "user": parse_line._ftp_user.pop(src), "password": ftp_arg, "info": ""
+        })
+
+    # SMTP AUTH
+    if smtp_cmd == "AUTH":
+        parse_line._smtp_auth[src] = True
+    if smtp_arg and parse_line._smtp_auth.get(src):
+        try:
+            decoded = base64.b64decode(smtp_arg).decode("utf-8", errors="ignore")
+            if decoded and len(decoded) > 2:
+                credentials.append({
+                    "protocol": "SMTP AUTH", "src": src, "dst": dst,
+                    "user": decoded, "password": "", "info": "base64"
+                })
+                parse_line._smtp_auth.pop(src, None)
+        except Exception:
+            pass
+
+parse_line._ftp_user = {}
+parse_line._smtp_auth = {}
+
+# ─── Report ───────────────────────────────────────────────────────────────────
 
 def print_report(output_file=None):
     lines = []
@@ -282,54 +293,66 @@ def print_report(output_file=None):
         lines.append(line)
         print(line)
 
-    p("=" * 60)
-    p("  NET-INTEL ANALYSIS REPORT")
-    p(f"  Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    p("=" * 60)
+    p("=" * 70)
+    p("  NET-INTEL REPORT")
+    p(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    p("=" * 70)
 
-    p(f"\n[HOSTS] ({len(hosts)} discovered)")
-    p(f"  {'IP':<18} {'MAC':<20} {'Vendor':<18} {'Hostname':<25} {'Ports':<20} Packets")
-    p("  " + "-" * 110)
-    for ip, info in sorted(hosts.items()):
-        ports = ", ".join(str(p_) for p_ in sorted(info["ports"])[:6]) or "-"
-        p(f"  {ip:<18} {(info['mac'] or '-'):<20} {info['vendor']:<18} {(info['hostname'] or '-'):<25} {ports:<20} {info['packets']}")
+    # Hosts
+    p(f"\n[HOSTS] ({len(hosts)} discovered)\n")
+    p(f"  {'IP':<20} {'MAC':<20} {'Vendor':<22} {'OS Guess':<26} {'Hostname':<28} {'DHCP Vendor':<25} Ports")
+    p("  " + "-" * 160)
+    for ip, h in sorted(hosts.items()):
+        ports = ", ".join(str(x) for x in sorted(h["ports"])[:8]) or "-"
+        p(
+            f"  {ip:<20} {(h['mac'] or '-'):<20} {h['vendor']:<22} "
+            f"{h['os_guess']:<26} {(h['hostname'] or '-'):<28} "
+            f"{(h['dhcp_vendor'] or '-'):<25} {ports}"
+        )
+        if h["user_agent"]:
+            p(f"  {'':20} User-Agent: {h['user_agent']}")
 
-    p(f"\n[CREDENTIALS] ({len(credentials)} found)")
+    # Credentials
+    p(f"\n[CREDENTIALS] ({len(credentials)} found)\n")
     if credentials:
         for c in credentials:
-            p(f"  [{c['protocol']}] {c['src']} -> {c['dst']}")
+            p(f"  [{c['protocol']}]  {c['src']}  ->  {c['dst']}")
             p(f"    User:     {c['user']}")
-            p(f"    Password: {c['password']}")
-            if c["info"]:
-                p(f"    Info:     {c['info']}")
+            if c['password']:
+                p(f"    Password: {c['password']}")
+            if c['info']:
+                p(f"    URI:      {c['info']}")
             p()
     else:
         p("  None found")
 
-    p(f"\n[DNS QUERIES] ({len(dns_queries)} total)")
-    seen = set()
+    # DNS
+    seen_dns = set()
+    p(f"\n[DNS QUERIES] ({len(dns_queries)} total)\n")
     for q in dns_queries:
         key = q["query"]
-        if key not in seen:
-            seen.add(key)
-            resp = f" -> {q['response']}" if q["response"] else ""
-            p(f"  {q['src']:<18} {q['type']:<6} {q['query']}{resp}")
+        if key not in seen_dns:
+            seen_dns.add(key)
+            resp = f"  ->  {q['response']}" if q["response"] else ""
+            p(f"  {(q['src'] or '-'):<20} {q['type']:<6} {q['query']}{resp}")
 
-    top_convs = sorted(conversations.items(), key=lambda x: x[1]["bytes"], reverse=True)[:10]
-    p(f"\n[TOP CONVERSATIONS] (by bytes)")
-    for (a, b), stats in top_convs:
-        p(f"  {a:<18} <-> {b:<18}  {stats['packets']} pkts  {stats['bytes']:,} bytes")
+    # Top conversations
+    top = sorted(conversations.items(), key=lambda x: x[1]["bytes"], reverse=True)[:15]
+    p(f"\n[TOP CONVERSATIONS] (by bytes)\n")
+    for (a, b), s in top:
+        p(f"  {a:<22} <->  {b:<22}  {s['packets']} pkts  {s['bytes']:,} bytes")
 
-    p(f"\n[SUSPICIOUS] ({len(suspicious)} alerts)")
+    # Suspicious
+    p(f"\n[SUSPICIOUS] ({len(suspicious)} alerts)\n")
     if suspicious:
         for s in suspicious:
-            p(f"  [{s['reason']}] {s['src']} -> {s['dst']}")
+            p(f"  [{s['reason']}]  {s['src']}  ->  {s['dst']}")
             if s["detail"]:
                 p(f"    {s['detail']}")
     else:
         p("  Nothing flagged")
 
-    p("\n" + "=" * 60)
+    p("\n" + "=" * 70)
 
     if output_file:
         with open(output_file, "w") as f:
@@ -338,56 +361,60 @@ def print_report(output_file=None):
 
 # ─── Modes ────────────────────────────────────────────────────────────────────
 
+def stream_tshark(cmd, label="packets"):
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    count = 0
+    try:
+        for line in proc.stdout:
+            if line.strip():
+                parse_line(line)
+                count += 1
+                if count % 5000 == 0:
+                    print(f"  {count:,} {label} processed...", end="\r", flush=True)
+    except KeyboardInterrupt:
+        proc.terminate()
+        print("\n[*] Stopped by user")
+    proc.wait()
+    print(f"  {count:,} {label} processed.   ")
+    return count
+
 def analyze_pcap(path, output=None):
     if not os.path.exists(path):
         print(f"[!] File not found: {path}")
         sys.exit(1)
-    print(f"[*] Analyzing: {path}")
-    cap = pyshark.FileCapture(path, keep_packets=False)
-    count = 0
-    for pkt in cap:
-        process_packet(pkt)
-        count += 1
-        if count % 1000 == 0:
-            print(f"    {count} packets processed...", end="\r")
-    cap.close()
-    print(f"\n[+] Done. {count} packets analyzed.\n")
+    load_oui()
+    print(f"[*] Analyzing: {path}  ({os.path.getsize(path) / 1e6:.1f} MB)\n")
+    cmd = run_tshark(path)
+    count = stream_tshark(cmd, "packets")
+    print(f"\n[+] Done. {count:,} packets analyzed.\n")
     print_report(output)
 
 def live_capture(interface, timeout=None, output=None):
-    print(f"[*] Live capture on {interface}")
+    load_oui()
+    print(f"[*] Live capture on interface: {interface}")
     if timeout:
-        print(f"[*] Will stop after {timeout} seconds")
+        print(f"[*] Stopping after {timeout} seconds")
     print("[*] Press Ctrl+C to stop\n")
-    try:
-        cap = pyshark.LiveCapture(interface=interface)
-        if timeout:
-            cap.sniff(timeout=timeout)
-            for pkt in cap._packets:
-                process_packet(pkt)
-        else:
-            for pkt in cap.sniff_continuously():
-                process_packet(pkt)
-    except KeyboardInterrupt:
-        print("\n[*] Capture stopped")
+    cmd = run_tshark(None, is_live=True, interface=interface, timeout=timeout)
+    stream_tshark(cmd, "packets")
     print_report(output)
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Passive network intelligence - credential extraction, host mapping, DNS analysis"
+        description="Passive network intelligence — credentials, host mapping, device fingerprinting, DNS"
     )
     sub = parser.add_subparsers(dest="mode")
 
-    p_pcap = sub.add_parser("pcap", help="Analyze a pcap file")
-    p_pcap.add_argument("-f", "--file", required=True, help="Path to .pcap / .pcapng file")
-    p_pcap.add_argument("-o", "--output", help="Save report to text file")
+    p_pcap = sub.add_parser("pcap", help="Analyze a pcap/pcapng file")
+    p_pcap.add_argument("-f", "--file", required=True, help="Path to pcap file")
+    p_pcap.add_argument("-o", "--output", help="Save report to file")
 
-    p_live = sub.add_parser("live", help="Live capture on an interface")
-    p_live.add_argument("-i", "--interface", required=True, help="Network interface (e.g. eth0, wlan0)")
+    p_live = sub.add_parser("live", help="Live capture on a network interface")
+    p_live.add_argument("-i", "--interface", required=True, help="Interface (e.g. eth0, wlan0)")
     p_live.add_argument("-t", "--timeout", type=int, help="Stop after N seconds")
-    p_live.add_argument("-o", "--output", help="Save report to text file")
+    p_live.add_argument("-o", "--output", help="Save report to file")
 
     args = parser.parse_args()
 
