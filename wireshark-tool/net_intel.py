@@ -14,7 +14,11 @@ from datetime import datetime
 
 TSHARK = shutil.which("tshark")
 OUI_CACHE = os.path.join(os.path.dirname(__file__), ".oui_cache.txt")
-OUI_URL = "https://www.wireshark.org/download/automated/data/manuf"
+OUI_URLS = [
+    "https://raw.githubusercontent.com/wireshark/wireshark/master/manuf",
+    "https://gitlab.com/wireshark/wireshark/-/raw/master/manuf",
+    "https://www.wireshark.org/download/automated/data/manuf",
+]
 
 # ─── OUI database ─────────────────────────────────────────────────────────────
 
@@ -27,10 +31,20 @@ def load_oui():
 
     if not os.path.exists(OUI_CACHE):
         print("[*] Downloading OUI database...")
-        try:
-            urllib.request.urlretrieve(OUI_URL, OUI_CACHE)
-            print("[+] OUI database cached\n")
-        except Exception:
+        downloaded = False
+        for url in OUI_URLS:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = resp.read().decode("utf-8", errors="ignore")
+                with open(OUI_CACHE, "w") as f:
+                    f.write(data)
+                print("[+] OUI database cached\n")
+                downloaded = True
+                break
+            except Exception:
+                continue
+        if not downloaded:
             print("[!] Could not download OUI database, vendor info will be limited\n")
             return
 
