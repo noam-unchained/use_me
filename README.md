@@ -17,4 +17,4 @@ Tools are organized by engagement phase — each folder has its own README with 
 
 [Utilities](Utilities/) sits outside the phase flow — cross-phase helpers (encoding, hash cracking, password auditing, phishing detection) you reach for throughout an engagement.
 
-For educational and authorized security testing use only.
+For educational and authorized security testing use only:)
