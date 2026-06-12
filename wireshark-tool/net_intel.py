@@ -158,7 +158,6 @@ FIELDS = [
     "dhcp.option.hostname", "dhcp.option.vendor_class_id",
     "bootp.option.hostname",
     "nbns.name",
-    "mdns.qry.name",
 ]
 
 def run_tshark(source, is_live=False, interface=None, timeout=None):
@@ -220,7 +219,7 @@ def parse_line(line):
     dhcp_vendor = g("dhcp.option.vendor_class_id")
 
     nbns = g("nbns.name")
-    mdns = g("mdns.qry.name")
+
 
     # Register hosts
     if src:
@@ -237,10 +236,6 @@ def parse_line(line):
     # NBNS (Windows NetBIOS name)
     if nbns and src:
         register_host(src, hostname=nbns.strip().rstrip("\x00"))
-
-    # mDNS
-    if mdns and src and mdns.endswith(".local"):
-        register_host(src, hostname=mdns.replace(".local", ""))
 
     # Conversations
     if src and dst:
