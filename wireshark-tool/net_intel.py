@@ -427,7 +427,13 @@ def print_report(output_file=None):
 # ─── Modes ────────────────────────────────────────────────────────────────────
 
 def stream_tshark(cmd, label="packets"):
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1
+    )
     count = 0
     try:
         for line in proc.stdout:
@@ -440,9 +446,8 @@ def stream_tshark(cmd, label="packets"):
         proc.terminate()
         print("\n[*] Stopped by user")
     proc.wait()
-    stderr_out = proc.stderr.read().strip()
-    if stderr_out and count == 0:
-        print(f"\n[!] tshark error:\n{stderr_out}\n")
+    if count == 0:
+        print(f"\n[!] No packets parsed. Check that tshark can read the file and has permissions.\n")
     print(f"  {count:,} {label} processed.   ")
     return count
 
