@@ -14,6 +14,25 @@ from datetime import datetime
 
 TSHARK = shutil.which("tshark")
 OUI_CACHE = os.path.join(os.path.dirname(__file__), ".oui_cache.txt")
+
+# ─── Colors ───────────────────────────────────────────────────────────────────
+
+class C:
+    RED     = "\033[91m"
+    YELLOW  = "\033[93m"
+    GREEN   = "\033[92m"
+    CYAN    = "\033[96m"
+    BLUE    = "\033[94m"
+    MAGENTA = "\033[95m"
+    GRAY    = "\033[90m"
+    BOLD    = "\033[1m"
+    RESET   = "\033[0m"
+
+def col(text, color):
+    return f"{color}{text}{C.RESET}"
+
+def strip_color(text):
+    return re.sub(r"\033\[[0-9;]+m", "", text)
 OUI_URLS = [
     "https://raw.githubusercontent.com/wireshark/wireshark/master/manuf",
     "https://gitlab.com/wireshark/wireshark/-/raw/master/manuf",
@@ -300,78 +319,110 @@ parse_line._smtp_auth = {}
 
 # ─── Report ───────────────────────────────────────────────────────────────────
 
+def host_color(h):
+    if h["hostname"] and h["mac"] and h["os_guess"] != "-":
+        return C.GREEN
+    if h["hostname"] or h["vendor"] != "-":
+        return C.CYAN
+    return C.GRAY
+
 def print_report(output_file=None):
-    lines = []
+    screen_lines = []
+    file_lines = []
 
     def p(line=""):
-        lines.append(line)
+        screen_lines.append(line)
+        file_lines.append(strip_color(line))
         print(line)
 
-    p("=" * 70)
-    p("  NET-INTEL REPORT")
+    # Legend
+    p(col("=" * 70, C.BOLD))
+    p(col("  NET-INTEL REPORT", C.BOLD))
     p(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    p("=" * 70)
+    p(col("=" * 70, C.BOLD))
+    p()
+    p(col("  COLOR LEGEND:", C.BOLD))
+    p(f"  {col('GREEN',   C.GREEN)}   - Host fully identified (IP + MAC + hostname + OS)")
+    p(f"  {col('CYAN',    C.CYAN)}    - Host partially identified (some info available)")
+    p(f"  {col('GRAY',    C.GRAY)}    - Host with minimal info (IP only)")
+    p(f"  {col('RED',     C.RED)}     - Credentials found / critical finding")
+    p(f"  {col('YELLOW',  C.YELLOW)}  - Suspicious activity / alert")
+    p(f"  {col('MAGENTA', C.MAGENTA)} - Device / OS fingerprint detail")
+    p(f"  {col('BLUE',    C.BLUE)}    - Top conversations")
+    p()
 
     # Hosts
-    p(f"\n[HOSTS] ({len(hosts)} discovered)\n")
+    p(col(f"[HOSTS] ({len(hosts)} discovered)", C.BOLD))
+    p()
     p(f"  {'IP':<20} {'MAC':<20} {'Vendor':<22} {'OS Guess':<26} {'Hostname':<28} {'DHCP Vendor':<25} Ports")
     p("  " + "-" * 160)
     for ip, h in sorted(hosts.items()):
         ports = ", ".join(str(x) for x in sorted(h["ports"])[:8]) or "-"
-        p(
+        color = host_color(h)
+        row = (
             f"  {ip:<20} {(h['mac'] or '-'):<20} {h['vendor']:<22} "
             f"{h['os_guess']:<26} {(h['hostname'] or '-'):<28} "
             f"{(h['dhcp_vendor'] or '-'):<25} {ports}"
         )
+        p(col(row, color))
         if h["user_agent"]:
-            p(f"  {'':20} User-Agent: {h['user_agent']}")
+            p(col(f"  {'':20} User-Agent: {h['user_agent']}", C.MAGENTA))
 
     # Credentials
-    p(f"\n[CREDENTIALS] ({len(credentials)} found)\n")
+    p()
+    p(col(f"[CREDENTIALS] ({len(credentials)} found)", C.BOLD))
+    p()
     if credentials:
         for c in credentials:
-            p(f"  [{c['protocol']}]  {c['src']}  ->  {c['dst']}")
-            p(f"    User:     {c['user']}")
+            p(col(f"  [{c['protocol']}]  {c['src']}  ->  {c['dst']}", C.RED))
+            p(col(f"    User:     {c['user']}", C.RED))
             if c['password']:
-                p(f"    Password: {c['password']}")
+                p(col(f"    Password: {c['password']}", C.RED))
             if c['info']:
-                p(f"    URI:      {c['info']}")
+                p(col(f"    URI:      {c['info']}", C.RED))
             p()
     else:
-        p("  None found")
+        p(col("  None found", C.GRAY))
 
     # DNS
     seen_dns = set()
-    p(f"\n[DNS QUERIES] ({len(dns_queries)} total)\n")
+    p()
+    p(col(f"[DNS QUERIES] ({len(dns_queries)} total)", C.BOLD))
+    p()
     for q in dns_queries:
         key = q["query"]
         if key not in seen_dns:
             seen_dns.add(key)
             resp = f"  ->  {q['response']}" if q["response"] else ""
-            p(f"  {(q['src'] or '-'):<20} {q['type']:<6} {q['query']}{resp}")
+            p(col(f"  {(q['src'] or '-'):<20} {q['type']:<6} {q['query']}{resp}", C.CYAN))
 
     # Top conversations
     top = sorted(conversations.items(), key=lambda x: x[1]["bytes"], reverse=True)[:15]
-    p(f"\n[TOP CONVERSATIONS] (by bytes)\n")
+    p()
+    p(col(f"[TOP CONVERSATIONS] (by bytes)", C.BOLD))
+    p()
     for (a, b), s in top:
-        p(f"  {a:<22} <->  {b:<22}  {s['packets']} pkts  {s['bytes']:,} bytes")
+        p(col(f"  {a:<22} <->  {b:<22}  {s['packets']} pkts  {s['bytes']:,} bytes", C.BLUE))
 
     # Suspicious
-    p(f"\n[SUSPICIOUS] ({len(suspicious)} alerts)\n")
+    p()
+    p(col(f"[SUSPICIOUS] ({len(suspicious)} alerts)", C.BOLD))
+    p()
     if suspicious:
         for s in suspicious:
-            p(f"  [{s['reason']}]  {s['src']}  ->  {s['dst']}")
+            p(col(f"  [{s['reason']}]  {s['src']}  ->  {s['dst']}", C.YELLOW))
             if s["detail"]:
-                p(f"    {s['detail']}")
+                p(col(f"    {s['detail']}", C.YELLOW))
     else:
-        p("  Nothing flagged")
+        p(col("  Nothing flagged", C.GRAY))
 
-    p("\n" + "=" * 70)
+    p()
+    p(col("=" * 70, C.BOLD))
 
     if output_file:
         with open(output_file, "w") as f:
-            f.write("\n".join(lines))
-        print(f"\n[+] Report saved to {output_file}")
+            f.write("\n".join(file_lines))
+        print(f"\n[+] Report saved to {output_file} (no colors in file)")
 
 # ─── Modes ────────────────────────────────────────────────────────────────────
 
