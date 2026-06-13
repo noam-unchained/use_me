@@ -13,5 +13,3 @@ Nothing here is phase-specific — these are things you reach for throughout an 
 | [password-auditor](password-auditor/) | Audit password strength and check against common lists |
 | [log-cleaner](log-cleaner/) | Clear system logs and shell history to remove traces |
 | [phishing-detector](phishing-detector/) | Analyze a URL and score its phishing risk (0–100) |
-| [vimeo-downloader](vimeo-downloader/) | Download a Vimeo video (incl. review links) at best quality with original audio |
-| [torrent-downloader](torrent-downloader%20not_public/) | Download the video from a .torrent file or magnet link, no GUI client needed |
