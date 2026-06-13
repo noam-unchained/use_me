@@ -16,7 +16,7 @@ finds the video's hidden hash, so you just paste the link as-is.
 The tool needs three things: **Python**, **yt-dlp**, and **ffmpeg**. Pick your
 operating system below.
 
-### 🍎 macOS
+### macOS
 
 1. Install [Homebrew](https://brew.sh) if you don't have it (paste this in the
    Terminal app):
@@ -32,12 +32,12 @@ operating system below.
 
 On macOS you run the tool with **`python3`**.
 
-### 🪟 Windows
+### Windows
 
 1. Install **Python** from [python.org/downloads](https://www.python.org/downloads/).
    On the first installer screen, **tick “Add python.exe to PATH”**, then click
    Install.
-2. Open **PowerShell** (Start menu → type "PowerShell") and run:
+2. Open **PowerShell** (Start menu, type "PowerShell") and run:
    ```powershell
    winget install yt-dlp.yt-dlp
    winget install Gyan.FFmpeg
@@ -76,7 +76,7 @@ python vimeo_downloader.py "PASTE_YOUR_LINK_HERE"
 
 That's it — the video downloads to the current folder at best quality.
 
-> ℹ️ Everything below shows `python3` (macOS). **On Windows, just replace
+> Note: everything below shows `python3` (macOS). **On Windows, just replace
 > `python3` with `python`.**
 
 A full example with a real review link:
