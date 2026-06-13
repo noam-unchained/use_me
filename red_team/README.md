@@ -1,7 +1,5 @@
 # Red Team Toolkit
 
-Some tools I created using Claude Code for my personal use. Feel free to use them!
-
 Tools are organized by engagement phase — each folder has its own README with the full tool list.
 
 <p align="center">
