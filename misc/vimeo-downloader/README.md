@@ -11,23 +11,90 @@ finds the video's hidden hash, so you just paste the link as-is.
 
 ---
 
-## Quick start
+## Setup (do this once)
 
+The tool needs three things: **Python**, **yt-dlp**, and **ffmpeg**. Pick your
+operating system below.
+
+### 🍎 macOS
+
+1. Install [Homebrew](https://brew.sh) if you don't have it (paste this in the
+   Terminal app):
+   ```bash
+   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+   ```
+2. Install everything in one line:
+   ```bash
+   brew install python yt-dlp ffmpeg
+   ```
+3. Download `vimeo_downloader.py` from this folder (the **Download raw file**
+   button on GitHub) into, say, your `Downloads` folder.
+
+On macOS you run the tool with **`python3`**.
+
+### 🪟 Windows
+
+1. Install **Python** from [python.org/downloads](https://www.python.org/downloads/).
+   On the first installer screen, **tick “Add python.exe to PATH”**, then click
+   Install.
+2. Open **PowerShell** (Start menu → type "PowerShell") and run:
+   ```powershell
+   winget install yt-dlp.yt-dlp
+   winget install Gyan.FFmpeg
+   ```
+   Then **close and reopen** PowerShell so the new tools are found.
+3. Download `vimeo_downloader.py` from this folder (the **Download raw file**
+   button on GitHub) into, say, your `Downloads` folder.
+
+On Windows you run the tool with **`python`** (not `python3`).
+
+---
+
+## How to use it
+
+**Step 1 — copy the Vimeo link** from your browser's address bar (the whole
+thing, e.g. `https://vimeo.com/reviews/.../videos/1200681001`).
+
+**Step 2 — open a terminal in the folder where you saved the script:**
+
+* **macOS:** in Terminal, type `cd ` (with a space), drag the folder onto the
+  window, press Enter.
+* **Windows:** open the folder in File Explorer, click the address bar, type
+  `powershell`, press Enter.
+
+**Step 3 — run the command, pasting your link inside the quotes:**
+
+macOS:
 ```bash
 python3 vimeo_downloader.py "PASTE_YOUR_LINK_HERE"
 ```
 
-**Put the link inside the quotes**, exactly as you copied it from the browser.
-Example with a real review link:
+Windows:
+```powershell
+python vimeo_downloader.py "PASTE_YOUR_LINK_HERE"
+```
 
+That's it — the video downloads to the current folder at best quality.
+
+> ℹ️ Everything below shows `python3` (macOS). **On Windows, just replace
+> `python3` with `python`.**
+
+A full example with a real review link:
 ```bash
 python3 vimeo_downloader.py "https://vimeo.com/reviews/f188456a-e465-49c0-bb96-b3851ea3d588/videos/1200681001"
 ```
 
-By default it saves to the current folder. To choose where it lands, add `-o`:
+### Save it somewhere specific
+
+Use `-o` to choose the destination folder:
 
 ```bash
+# macOS
 python3 vimeo_downloader.py -o ~/Downloads "PASTE_YOUR_LINK_HERE"
+```
+```powershell
+# Windows
+python vimeo_downloader.py -o "%USERPROFILE%\Downloads" "PASTE_YOUR_LINK_HERE"
 ```
 
 ---
@@ -85,15 +152,17 @@ python3 vimeo_downloader.py -F "PASTE_YOUR_LINK_HERE"
 
 ---
 
-## Requirements
+## Troubleshooting
 
-Both must be installed and reachable by the Python you run the script with:
-
-```bash
-pip install -U yt-dlp
-brew install ffmpeg
-```
-
-If you get `No module named expat` (a DASH/XML error from a broken Python
-install), run the script with a different Python, e.g.
-`/usr/local/bin/python3 vimeo_downloader.py ...`.
+* **`python: command not found` / `'python' is not recognized`** — Python isn't
+  installed or wasn't added to PATH. Redo the Setup step for your OS (on Windows,
+  reinstall Python with “Add to PATH” ticked).
+* **`yt-dlp is not installed`** — run `pip install -U yt-dlp` (macOS:
+  `pip3 install -U yt-dlp`), or reinstall it from the Setup step.
+* **`ffmpeg not found`** — install it from the Setup step (`brew install ffmpeg`
+  on macOS, `winget install Gyan.FFmpeg` on Windows).
+* **`No module named expat`** (a broken Python install) — on macOS, run the
+  script with a different Python, e.g.
+  `/usr/local/bin/python3 vimeo_downloader.py ...`.
+* **A review link gives "could not find the unlisted hash"** — the link may be
+  expired or private. Re-copy a fresh link from the browser.
