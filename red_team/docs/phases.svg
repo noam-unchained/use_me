@@ -15,7 +15,7 @@
 <text x="222" y="86" fill="#ffffff" font-family="sans-serif" font-size="17" font-weight="500">Reconnaissance</text>
 <text x="222" y="108" fill="#dbeafe" font-family="sans-serif" font-size="13">Passive collection - no contact</text>
 <rect x="444" y="81" width="82" height="26" rx="13" fill="#ffffff" fill-opacity="0.2"/>
-<text x="485" y="94" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-family="sans-serif" font-size="12">5 tools</text>
+<text x="485" y="94" text-anchor="middle" dominant-baseline="central" fill="#ffffff" font-family="sans-serif" font-size="12">4 tools</text>
 </g>
 <line x1="340" y1="130" x2="340" y2="160" stroke="#9ca3af" stroke-width="2" marker-end="url(#arr3)"/>
 
