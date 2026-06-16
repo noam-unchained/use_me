@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>Email Enumeration — cheat sheet</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;max-width:1180px;margin:36px auto;padding:0 22px;color:#2c2c2a;line-height:1.6}
+  h1{font-size:22px;font-weight:500;margin-bottom:4px}
+  .intro{color:#5f5e5a;margin-top:0}
+  .layout{display:flex;gap:36px;align-items:flex-start;flex-wrap:wrap;margin-top:20px}
+  .diagram{flex:1 1 360px;min-width:300px;position:sticky;top:20px}
+  .steps{flex:1 1 440px;min-width:320px}
+  .step{margin-top:4px;margin-bottom:24px;page-break-inside:avoid}
+  .step .label{font-weight:500;font-size:16px}
+  .step p{margin:6px 0}
+  pre{background:#f1efe8;border:1px solid #d3d1c7;border-radius:6px;padding:10px 12px;overflow-x:auto;font-size:13px;line-height:1.5}
+  svg{display:block;max-width:100%;height:auto}
+  .key{margin-top:28px;color:#5f5e5a;border-top:1px solid #d3d1c7;padding-top:14px}
+  table{border-collapse:collapse;width:100%;margin-top:8px;font-size:13px}
+  th{background:#f1efe8;border:1px solid #d3d1c7;padding:6px 10px;text-align:left;font-weight:500}
+  td{border:1px solid #d3d1c7;padding:6px 10px;vertical-align:top}
+  td:first-child{font-family:monospace;font-size:12px;white-space:nowrap}
+  tr:nth-child(even) td{background:#faf9f6}
+  .warn{background:#fff4e5;border:1px solid #e8a020;border-radius:6px;padding:8px 12px;font-size:13px;margin-bottom:14px;color:#7a4800}
+</style></head><body>
+<h1>Email Enumeration — cheat sheet</h1>
+<p class="intro">Generates corporate email permutations for a target and verifies them via SMTP — without sending a single email.</p>
+<div class="layout">
+<div class="diagram"><svg xmlns="http://www.w3.org/2000/svg" width="680" height="570" viewBox="0 0 680 570">
+<style>
+  text{font-family:Arial,Helvetica,sans-serif}
+  .th{font-size:14px;font-weight:500}
+  .ts{font-size:12px}
+  .gray .box{fill:#F1EFE8;stroke:#5F5E5A;stroke-width:.5}
+  .gray .th{fill:#444441} .gray .ts{fill:#5F5E5A}
+  .coral .box{fill:#FAECE7;stroke:#993C1D;stroke-width:.5}
+  .coral .th{fill:#712B13} .coral .ts{fill:#993C1D}
+  .blue .box{fill:#E6F1FB;stroke:#185FA5;stroke-width:.5}
+  .blue .th{fill:#0C447C} .blue .ts{fill:#185FA5}
+  .green .box{fill:#E8F5E9;stroke:#2E7D32;stroke-width:.5}
+  .green .th{fill:#1B5E20} .green .ts{fill:#2E7D32}
+  .arrow{stroke:#888780;stroke-width:1.5;fill:none}
+</style>
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#888780" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+<g class="gray">
+  <rect class="box" x="140" y="40" width="380" height="54" rx="4"/>
+  <text class="th" x="330" y="61" text-anchor="middle">1. Install &amp; Run</text>
+  <text class="ts" x="330" y="79" text-anchor="middle">python3 email_enum.py</text>
+</g>
+<line class="arrow" x1="330" y1="94" x2="330" y2="110" marker-end="url(#arrow)"/>
+<g class="gray">
+  <rect class="box" x="140" y="112" width="380" height="54" rx="4"/>
+  <text class="th" x="330" y="133" text-anchor="middle">2. Enter Target Name</text>
+  <text class="ts" x="330" y="151" text-anchor="middle">First name + last name</text>
+</g>
+<line class="arrow" x1="330" y1="166" x2="330" y2="182" marker-end="url(#arrow)"/>
+<g class="gray">
+  <rect class="box" x="140" y="184" width="380" height="54" rx="4"/>
+  <text class="th" x="330" y="205" text-anchor="middle">3. Enter Target Domain</text>
+  <text class="ts" x="330" y="223" text-anchor="middle">company.com</text>
+</g>
+<line class="arrow" x1="330" y1="238" x2="330" y2="254" marker-end="url(#arrow)"/>
+<g class="coral">
+  <rect class="box" x="140" y="256" width="380" height="54" rx="4"/>
+  <text class="th" x="330" y="277" text-anchor="middle">4. Pattern Generation</text>
+  <text class="ts" x="330" y="295" text-anchor="middle">14 email format permutations</text>
+</g>
+<line class="arrow" x1="330" y1="310" x2="330" y2="326" marker-end="url(#arrow)"/>
+<g class="blue">
+  <rect class="box" x="140" y="328" width="380" height="54" rx="4"/>
+  <text class="th" x="330" y="349" text-anchor="middle">5. MX Record Lookup</text>
+  <text class="ts" x="330" y="367" text-anchor="middle">Finds the mail server for the domain</text>
+</g>
+<line class="arrow" x1="330" y1="382" x2="330" y2="398" marker-end="url(#arrow)"/>
+<g class="blue">
+  <rect class="box" x="140" y="400" width="380" height="54" rx="4"/>
+  <text class="th" x="330" y="421" text-anchor="middle">6. SMTP Verification</text>
+  <text class="ts" x="330" y="439" text-anchor="middle">RCPT TO probe — no email sent</text>
+</g>
+<line class="arrow" x1="330" y1="454" x2="330" y2="470" marker-end="url(#arrow)"/>
+<g class="green">
+  <rect class="box" x="140" y="472" width="380" height="54" rx="4"/>
+  <text class="th" x="330" y="493" text-anchor="middle">7. Results</text>
+  <text class="ts" x="330" y="511" text-anchor="middle">VALID / INVALID / UNKNOWN per address</text>
+</g>
+<line class="arrow" x1="330" y1="526" x2="330" y2="542" marker-end="url(#arrow)"/>
+</svg></div>
+<div class="steps"><div class="step"><span class="label">Step 1 — Install &amp; Run</span><p>Install dependencies and launch the tool:</p><pre>pip install -r requirements.txt
+python3 email_enum.py</pre><p>Runs interactively — no flags needed.</p></div>
+<div class="step"><span class="label">Step 2 &amp; 3 — Enter Name and Domain</span><p>You will be prompted for:</p><pre>First name:  john
+Last name:   doe
+Domain:      company.com</pre><p>The tool generates all common corporate email patterns from these three inputs.</p></div>
+<div class="step"><span class="label">Step 4 — Pattern Generation</span><p>14 permutations are generated automatically:</p><table><tr><th>Pattern</th><th>Example</th></tr><tr><td>first.last@domain</td><td>john.doe@company.com</td></tr><tr><td>firstlast@domain</td><td>johndoe@company.com</td></tr><tr><td>flast@domain</td><td>jdoe@company.com</td></tr><tr><td>firstl@domain</td><td>johnd@company.com</td></tr><tr><td>f.last@domain</td><td>j.doe@company.com</td></tr><tr><td>first@domain</td><td>john@company.com</td></tr><tr><td>last@domain</td><td>doe@company.com</td></tr><tr><td>last.first@domain</td><td>doe.john@company.com</td></tr><tr><td>first_last@domain</td><td>john_doe@company.com</td></tr><tr><td>first-last@domain</td><td>john-doe@company.com</td></tr></table></div>
+<div class="step"><span class="label">Step 5 — MX Record Lookup</span><p>The tool resolves the domain's MX record to find its mail server before probing — no guessing.</p></div>
+<div class="step"><span class="label">Step 6 — SMTP Verification</span><p>Connects to the mail server and issues a <code>RCPT TO</code> command for each address. No email is ever sent.</p><table><tr><th>Response</th><th>Meaning</th></tr><tr><td>250</td><td>VALID — address exists</td></tr><tr><td>550</td><td>INVALID — address does not exist</td></tr><tr><td>other</td><td>UNKNOWN — server is rate-limiting or greylisting</td></tr></table></div>
+<div class="step"><span class="label">Step 7 — Reading Results</span><p>A summary table is printed at the end:</p><pre>[+] VALID   john.doe@company.com
+[-] INVALID johndoe@company.com
+[?] UNKNOWN jdoe@company.com</pre><p>Valid addresses are the primary output — use them for phishing simulation, recon, or access testing.</p></div>
+</div>
+</div>
+<p class="key">Key idea: some mail servers disable SMTP probing (catch-all domains always return 250). If most results are VALID or UNKNOWN, the domain likely uses a catch-all — treat results as unverified.</p>
+</body></html>
