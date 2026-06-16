@@ -5,5 +5,6 @@ __pycache__/
 .venv/
 venv/
 
-# Local-only tools: any folder marked "not_public" is never pushed to GitHub
+# Local-only: anything marked "not_public" is never pushed to GitHub
 *not_public/
+*_not_public*
