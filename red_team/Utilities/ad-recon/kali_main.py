@@ -229,54 +229,60 @@ def run_ldap_enum(cfg):
                 _ok(f"Got {sname}")
 
     # 2. netexec ldap targeted queries  (PowerView equivalents)
-    _info("netexec ldap — targeted queries...")
-    nxc_queries = {
-        "KERBEROASTABLE USERS":     ["--kerberoasting", os.path.join(raw_dir, "kerberoast_hashes.txt")],
-        "ASREP ROASTABLE USERS":    ["--asreproast",    os.path.join(raw_dir, "asrep_hashes.txt")],
-        "UNCONSTRAINED DELEGATION": ["--trusted-for-delegation"],
-        "ADMIN USERS":              ["--admin-count"],
-        "DOMAIN USERS LIST":        ["--users"],
-        "DOMAIN GROUPS":            ["--groups"],
-        "ACTIVE USERS":             ["--active-users"],
-        "PASSWORD NOT REQUIRED":    ["--password-not-required"],
-    }
-    for sname, flags in nxc_queries.items():
-        r = subprocess.run(
-            _nxc_auth(cfg, "ldap") + flags,
-            capture_output=True, text=True, timeout=30, errors="ignore"
-        )
-        content = (r.stdout + r.stderr).strip()
-        if content:
-            output += f"\n=== {sname} ===\n{content}\n"
-            _ok(f"Got {sname}")
+    if not _bin_exists("netexec"):
+        _warn("netexec not found — skipping targeted LDAP queries. Install: sudo apt install netexec")
+    else:
+        _info("netexec ldap — targeted queries...")
+        nxc_queries = {
+            "KERBEROASTABLE USERS":     ["--kerberoasting", os.path.join(raw_dir, "kerberoast_hashes.txt")],
+            "ASREP ROASTABLE USERS":    ["--asreproast",    os.path.join(raw_dir, "asrep_hashes.txt")],
+            "UNCONSTRAINED DELEGATION": ["--trusted-for-delegation"],
+            "ADMIN USERS":              ["--admin-count"],
+            "DOMAIN USERS LIST":        ["--users"],
+            "DOMAIN GROUPS":            ["--groups"],
+            "ACTIVE USERS":             ["--active-users"],
+            "PASSWORD NOT REQUIRED":    ["--password-not-required"],
+        }
+        for sname, flags in nxc_queries.items():
+            r = subprocess.run(
+                _nxc_auth(cfg, "ldap") + flags,
+                capture_output=True, text=True, timeout=30, errors="ignore"
+            )
+            content = (r.stdout + r.stderr).strip()
+            if content:
+                output += f"\n=== {sname} ===\n{content}\n"
+                _ok(f"Got {sname}")
 
     # 3. LDAP raw queries — constrained delegation, GPOs, trusts, ACL-protected accounts
-    _info("ldap raw queries — delegation, GPOs, trusts, protected accounts...")
-    dn = _domain_to_dn(cfg["domain"])
-    ldap_queries = {
-        "CONSTRAINED DELEGATION": f"(msDS-AllowedToDelegateTo=*)",
-        "GPO LIST":               f"(objectClass=groupPolicyContainer)",
-        "DOMAIN TRUSTS":          f"(objectClass=trustedDomain)",
-        "ADMINSDEHOLDER USERS":   f"(&(objectCategory=person)(objectClass=user)(adminCount=1))",
-        "DONT REQ PREAUTH":       f"(&(objectclass=user)(userAccountControl:1.2.840.113549.1.1.11:=4194304))",
-    }
-    for sname, ldap_filter in ldap_queries.items():
-        r = subprocess.run(
-            ["ldapsearch", "-x",
-             "-H", f"ldap://{cfg['dc_ip']}",
-             "-D", f"{cfg['user']}@{cfg['domain']}",
-             "-w", cfg["password"] if cfg["password"] else "",
-             "-b", dn, ldap_filter,
-             "dn", "sAMAccountName", "displayName", "msDS-AllowedToDelegateTo",
-             "trustPartner", "trustDirection", "gPCFileSysPath"],
-            capture_output=True, text=True, timeout=30, errors="ignore"
-        )
-        content = (r.stdout + r.stderr).strip()
-        if content and "result: 0" in content:
-            output += f"\n=== {sname} ===\n{content}\n"
-            _ok(f"Got {sname}")
-        else:
-            _warn(f"No result for {sname} (may need bind)")
+    if not _bin_exists("ldapsearch"):
+        _warn("ldapsearch not found — skipping raw LDAP queries. Install: sudo apt install ldap-utils")
+    else:
+        _info("ldap raw queries — delegation, GPOs, trusts, protected accounts...")
+        dn = _domain_to_dn(cfg["domain"])
+        ldap_queries = {
+            "CONSTRAINED DELEGATION": "(msDS-AllowedToDelegateTo=*)",
+            "GPO LIST":               "(objectClass=groupPolicyContainer)",
+            "DOMAIN TRUSTS":          "(objectClass=trustedDomain)",
+            "ADMINSDEHOLDER USERS":   "(&(objectCategory=person)(objectClass=user)(adminCount=1))",
+            "DONT REQ PREAUTH":       "(&(objectclass=user)(userAccountControl:1.2.840.113549.1.1.11:=4194304))",
+        }
+        for sname, ldap_filter in ldap_queries.items():
+            r = subprocess.run(
+                ["ldapsearch", "-x",
+                 "-H", f"ldap://{cfg['dc_ip']}",
+                 "-D", f"{cfg['user']}@{cfg['domain']}",
+                 "-w", cfg["password"] if cfg["password"] else "",
+                 "-b", dn, ldap_filter,
+                 "dn", "sAMAccountName", "displayName", "msDS-AllowedToDelegateTo",
+                 "trustPartner", "trustDirection", "gPCFileSysPath"],
+                capture_output=True, text=True, timeout=30, errors="ignore"
+            )
+            content = (r.stdout + r.stderr).strip()
+            if content and "result: 0" in content:
+                output += f"\n=== {sname} ===\n{content}\n"
+                _ok(f"Got {sname}")
+            else:
+                _warn(f"No result for {sname} (may need bind)")
 
     # 4. impacket-findDelegation — dedicated delegation finder
     if _bin_exists("impacket-findDelegation"):
@@ -373,11 +379,17 @@ def run_bloodhound(cfg):
 
 
 def run_shares(cfg):
+    if not _bin_exists("netexec"):
+        _warn("Skipping SMB shares — netexec not found.")
+        return ""
     return _run(_nxc_auth(cfg) + ["--shares"],
                 os.path.join(cfg["raw_dir"], "shares.txt"), timeout=60)
 
 
 def run_passpol(cfg):
+    if not _bin_exists("netexec"):
+        _warn("Skipping password policy — netexec not found.")
+        return ""
     return _run(_nxc_auth(cfg) + ["--pass-pol"],
                 os.path.join(cfg["raw_dir"], "passpol.txt"), timeout=60)
 
