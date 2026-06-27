@@ -205,12 +205,17 @@ def run_ldap_enum(cfg):
         else:
             ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "-p", cfg["password"]]
 
+        # Note: no --no-html flag (not valid in all versions; just let it dump everything)
         r = subprocess.run(
-            [ldd_bin] + ldd_auth + [cfg["dc_ip"], "-o", dump_dir, "--no-html"],
+            [ldd_bin] + ldd_auth + [cfg["dc_ip"], "-o", dump_dir],
             capture_output=True, text=True, timeout=120, errors="ignore"
         )
         ldd_out = r.stdout + r.stderr
         output += f"=== LDAPDOMAINDUMP ===\n{ldd_out}\n"
+        if "Could not bind" in ldd_out or "invalidCredentials" in ldd_out:
+            _warn("ldapdomaindump: authentication failed — check credentials")
+        elif "Connecting" in ldd_out:
+            _ok("ldapdomaindump completed")
 
     section_map = {
         "domain_users.grep":       "DOMAIN USERS",
@@ -284,7 +289,23 @@ def run_ldap_enum(cfg):
             else:
                 _warn(f"No result for {sname} (may need bind)")
 
-    # 4. impacket-findDelegation — dedicated delegation finder
+    # 4. impacket-GetADUsers — user list fallback (always available via impacket)
+    if _bin_exists("impacket-GetADUsers"):
+        _info("impacket-GetADUsers — domain user enumeration...")
+        r = _run(
+            ["impacket-GetADUsers"] + _imp_auth(cfg) + ["-dc-ip", cfg["dc_ip"], "-all"],
+            os.path.join(raw_dir, "adusers.txt"), timeout=60
+        )
+        if r.strip() and "Name" in r:
+            users = re.findall(r"^\s*(\w[\w\.\-]+)\s+\S+\s+\S+", r, re.MULTILINE)
+            if users:
+                users_file = os.path.join(raw_dir, "users.txt")
+                with open(users_file, "w") as f:
+                    f.write("\n".join(users))
+                output += f"\n=== DOMAIN USERS LIST ===\n{r}\n"
+                _ok(f"Got {len(users)} domain users via impacket")
+
+    # 5. impacket-findDelegation — dedicated delegation finder
     if _bin_exists("impacket-findDelegation"):
         _info("impacket-findDelegation — all delegation types...")
         r = _run(
@@ -839,11 +860,24 @@ def main():
 
     _section("PHASE 3 - Report Generation")
 
+    # Show what raw files were actually collected
+    raw_files = [f for f in os.listdir(cfg["raw_dir"]) if os.path.isfile(os.path.join(cfg["raw_dir"], f)) and os.path.getsize(os.path.join(cfg["raw_dir"], f)) > 0]
+    ldd_files = []
+    ldd_dir = os.path.join(cfg["raw_dir"], "ldapdomaindump")
+    if os.path.isdir(ldd_dir):
+        ldd_files = [f for f in os.listdir(ldd_dir) if os.path.getsize(os.path.join(ldd_dir, f)) > 0]
+
+    if raw_files or ldd_files:
+        _ok(f"Raw files collected: {', '.join(raw_files)}" + (f" | ldapdomaindump: {', '.join(ldd_files)}" if ldd_files else ""))
+    else:
+        _warn("No raw files collected — authentication may have failed for all tools. Check credentials.")
+
     findings = parse_results(raw)
     _ok(f"Parsed {len(findings)} finding(s).")
 
     loot = collect_loot(raw, cfg)
 
+    # Always generate reports regardless of findings count
     try:
         r1, r2 = build_reports(findings, loot, raw, cfg)
         _section("Done")
@@ -855,7 +889,7 @@ def main():
         if zips:
             _ok(f"BloodHound ZIP:             {os.path.join(cfg['raw_dir'], zips[0])}")
         else:
-            _warn("No BloodHound ZIP — check raw/bloodhound.log")
+            _warn("No BloodHound ZIP — bloodhound-python may not be installed or failed")
         print()
     except Exception:
         _err("Report generation failed:")
