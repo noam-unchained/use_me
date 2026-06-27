@@ -259,6 +259,12 @@ def run_powerview(raw_dir, config):
 
         f'Write-Output "=== SMB SHARES ==="',
         f'Find-DomainShare -Domain {domain} | Format-Table -AutoSize',
+
+        f'Write-Output "=== PASSWD NOTREQD USERS ==="',
+        f'Get-DomainUser -UACFilter PASSWD_NOTREQD -Domain {domain} | Select-Object samaccountname,description | Format-Table -AutoSize',
+
+        f'Write-Output "=== ADMINCOUNT USERS ==="',
+        f'Get-DomainUser -AdminCount -Domain {domain} | Select-Object samaccountname,memberof | Format-Table -AutoSize',
     ]
 
     return _run_ps1("powerview", commands, output_file, timeout=300)

@@ -293,6 +293,67 @@ def _parse_domain_info(pv_text):
     )] if lines else []
 
 
+def _parse_passwd_notreqd(pv_text):
+    section = _extract_section(pv_text, "PASSWD NOTREQD USERS")
+    rows = _table_rows(section)
+    if not rows:
+        return []
+    return [Finding(
+        id          = "password_not_required",
+        title       = f"Password Not Required ({len(rows)} accounts)",
+        severity    = "HIGH",
+        category    = "PasswordPolicy",
+        description = (
+            "PASSWD_NOTREQD flag set — these accounts may have empty or blank passwords. "
+            "Try authenticating with an empty password before spraying."
+        ),
+        evidence    = [r.split()[0] for r in rows if r.split()],
+        tool        = "PowerView",
+        raw_section = section,
+    )]
+
+
+def _parse_admincount(pv_text):
+    section = _extract_section(pv_text, "ADMINCOUNT USERS")
+    rows = _table_rows(section)
+    if len(rows) <= 5:   # a few AdminSDHolder accounts is normal
+        return []
+    return [Finding(
+        id          = "admincount_users",
+        title       = f"AdminSDHolder Protected Accounts ({len(rows)} found)",
+        severity    = "MEDIUM",
+        category    = "ACL",
+        description = (
+            f"{len(rows)} accounts have AdminCount=1. These are protected by AdminSDHolder — "
+            "check BloodHound for ACL abuse paths leading to any of these."
+        ),
+        evidence    = [r.split()[0] for r in rows if r.split()],
+        tool        = "PowerView",
+        raw_section = section,
+    )]
+
+
+def _parse_smb_shares(pv_text):
+    section = _extract_section(pv_text, "SMB SHARES")
+    rows = _table_rows(section)
+    interesting = [r for r in rows if re.search(r"READ|WRITE", r, re.IGNORECASE)]
+    if not interesting:
+        return []
+    return [Finding(
+        id          = "smb_shares",
+        title       = f"Readable/Writable SMB Shares ({len(interesting)} found)",
+        severity    = "MEDIUM",
+        category    = "Enumeration",
+        description = (
+            "Accessible SMB shares found. Check SYSVOL/NETLOGON for scripts and Group Policy "
+            "with stored credentials. Other shares may contain sensitive data."
+        ),
+        evidence    = interesting[:20],
+        tool        = "PowerView",
+        raw_section = section,
+    )]
+
+
 def _parse_domain_admins(pv_text):
     section = _extract_section(pv_text, "DOMAIN ADMINS")
     rows    = _table_rows(section)
@@ -535,19 +596,20 @@ def collect_loot(raw_outputs: dict, config: dict) -> dict:
     sb = raw_outputs.get("seatbelt",  "")
 
     loot = {
-        "domain_users":        [],
-        "domain_admins":       [],
-        "domain_computers":    [],
-        "domain_controllers":  [],
-        "kerberoastable":      [],
-        "asrep_roastable":     [],
-        "spns":                [],
-        "hashes_found":        [],
-        "passwords_found":     [],
-        "interesting_files":   [],
-        "password_policy":     [],
-        "domain_trusts":       [],
-        "gpos":                [],
+        "domain_users":           [],
+        "domain_admins":          [],
+        "domain_computers":       [],
+        "domain_controllers":     [],
+        "kerberoastable":         [],
+        "asrep_roastable":        [],
+        "spns":                   [],
+        "hashes_found":           [],
+        "passwords_found":        [],
+        "constrained_delegation": [],
+        "interesting_files":      [],
+        "password_policy":        [],
+        "domain_trusts":          [],
+        "gpos":                   [],
     }
 
     if pv:
@@ -606,6 +668,15 @@ def collect_loot(raw_outputs: dict, config: dict) -> dict:
                 if key in line:
                     loot["password_policy"].append(line.strip())
 
+        # Constrained delegation
+        section = _extract_section(pv, "CONSTRAINED DELEGATION")
+        for row in _table_rows(section):
+            parts = row.split()
+            if len(parts) >= 2:
+                loot["constrained_delegation"].append(f"{parts[0]} -> {parts[1]}")
+            elif parts:
+                loot["constrained_delegation"].append(parts[0])
+
         # Trusts
         section = _extract_section(pv, "DOMAIN TRUSTS")
         for row in _table_rows(section):
@@ -662,6 +733,9 @@ def parse_all(raw_outputs: dict) -> List[Finding]:
         findings += _parse_password_policy(pv)
         findings += _parse_domain_info(pv)
         findings += _parse_domain_admins(pv)
+        findings += _parse_passwd_notreqd(pv)
+        findings += _parse_admincount(pv)
+        findings += _parse_smb_shares(pv)
 
     wp = raw_outputs.get("winpeas", "")
     if wp:

