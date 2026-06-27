@@ -1,0 +1,6 @@
+results/
+tools/
+__pycache__/
+core/__pycache__/
+*.pyc
+.DS_Store
