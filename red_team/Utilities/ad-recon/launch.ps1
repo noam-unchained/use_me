@@ -198,7 +198,9 @@ $target = @{
 $outDir = Read-Host "  > Output directory [.\results]"
 if (-not $outDir) { $outDir = ".\results" }
 $rawDir = Join-Path $outDir "raw"
-$toolsDir = Join-Path $PSScriptRoot "tools"
+$defaultTools = "C:\Users\$env:USERNAME\tools"
+$toolsInput = Read-Host "  > Tools directory [$defaultTools]"
+$toolsDir = if ($toolsInput) { $toolsInput } else { $defaultTools }
 New-Item -ItemType Directory -Force -Path $outDir, $rawDir, $toolsDir | Out-Null
 
 # Auto-scope
