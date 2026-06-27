@@ -59,7 +59,7 @@ REQUIRED_TOOLS = {
     "impacket-GetUserSPNs": "pip3 install impacket",
     "impacket-GetNPUsers":  "pip3 install impacket",
     "impacket-secretsdump": "pip3 install impacket",
-    "impacket-ldapdomaindump": "pip3 install impacket",
+    "ldapdomaindump":       "pip3 install ldapdomaindump",
     "netexec":              "sudo apt install netexec",
 }
 
@@ -118,7 +118,14 @@ def wizard():
 # ---------------------------------------------------------------------------
 # Runner helpers
 # ---------------------------------------------------------------------------
+def _bin_exists(name):
+    return subprocess.run(["which", name], capture_output=True).returncode == 0
+
 def _run(cmd, out_file, timeout=300, cwd=None):
+    binary = cmd[0]
+    if not _bin_exists(binary):
+        _warn(f"Skipping — '{binary}' not found. Install it and re-run.")
+        return ""
     _info(f"Running: {' '.join(str(x) for x in cmd)}")
     try:
         result = subprocess.run(
@@ -165,17 +172,28 @@ def run_ldap_enum(cfg):
 
     # 1. ldapdomaindump
     _info("ldapdomaindump — full AD object dump...")
-    if cfg["ntlm"]:
-        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "--hashes", cfg["ntlm"]]
-    else:
-        ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "-p", cfg["password"]]
 
-    r = subprocess.run(
-        ["impacket-ldapdomaindump"] + ldd_auth + [cfg["dc_ip"], "-o", dump_dir, "--no-html"],
-        capture_output=True, text=True, timeout=120, errors="ignore"
-    )
-    ldd_out = r.stdout + r.stderr
-    output += f"=== LDAPDOMAINDUMP ===\n{ldd_out}\n"
+    # find the correct binary name
+    ldd_bin = None
+    for candidate in ["ldapdomaindump", "impacket-ldapdomaindump", "ldap-domaindump"]:
+        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
+            ldd_bin = candidate
+            break
+
+    if not ldd_bin:
+        _warn("ldapdomaindump not found — install with: pip3 install ldapdomaindump")
+    else:
+        if cfg["ntlm"]:
+            ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "--hashes", cfg["ntlm"]]
+        else:
+            ldd_auth = ["-u", f"{cfg['domain']}\\{cfg['user']}", "-p", cfg["password"]]
+
+        r = subprocess.run(
+            [ldd_bin] + ldd_auth + [cfg["dc_ip"], "-o", dump_dir, "--no-html"],
+            capture_output=True, text=True, timeout=120, errors="ignore"
+        )
+        ldd_out = r.stdout + r.stderr
+        output += f"=== LDAPDOMAINDUMP ===\n{ldd_out}\n"
 
     section_map = {
         "domain_users.grep":       "DOMAIN USERS",
