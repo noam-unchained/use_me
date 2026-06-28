@@ -44,6 +44,64 @@ BANNER = r"""
 def _has(bin_name):
     return subprocess.run(["which", bin_name], capture_output=True).returncode == 0
 
+def _install(cmd_str):
+    """Run an install command, streaming output."""
+    _info(f"Installing: {cmd_str}")
+    r = subprocess.run(cmd_str, shell=True, text=True, errors="ignore")
+    return r.returncode == 0
+
+OPTIONAL_TOOLS = [
+    {
+        "bins":    ["ldapdomaindump"],
+        "name":    "ldapdomaindump",
+        "what":    "Full AD object dump (users, groups, computers, policy)",
+        "install": "pip3 install ldapdomaindump --break-system-packages",
+    },
+    {
+        "bins":    ["netexec"],
+        "name":    "netexec",
+        "what":    "SMB shares, password policy, spray, targeted LDAP queries",
+        "install": "sudo apt install -y netexec",
+    },
+    {
+        "bins":    ["bloodhound-python"],
+        "name":    "bloodhound-python",
+        "what":    "Full BloodHound data collection (ZIP for GUI)",
+        "install": "pip3 install bloodhound --break-system-packages",
+    },
+    {
+        "bins":    ["ldapsearch"],
+        "name":    "ldapsearch",
+        "what":    "Raw LDAP queries (delegation, GPOs, trusts, AdminSDHolder)",
+        "install": "sudo apt install -y ldap-utils",
+    },
+]
+
+def check_and_install_tools():
+    _section("Dependency Check")
+
+    missing = [t for t in OPTIONAL_TOOLS if not any(_has(b) for b in t["bins"])]
+
+    if not missing:
+        _ok("All optional tools are installed.")
+        return
+
+    print(f"  {C.YELLOW}The following optional tools are missing:{C.RESET}\n")
+    for t in missing:
+        print(f"    {C.RED}[x]{C.RESET}  {t['name']:<25} {C.DIM}{t['what']}{C.RESET}")
+
+    print()
+    ans = input(f"  {C.CYAN}>{C.RESET} Install missing tools now? [Y/n]: ").strip().lower()
+    if ans in ("", "y", "yes"):
+        for t in missing:
+            ok = _install(t["install"])
+            if ok:
+                _ok(f"{t['name']} installed.")
+            else:
+                _warn(f"{t['name']} install failed — will skip during enumeration.")
+    else:
+        _warn("Skipping installs — missing tools will be skipped during enumeration.")
+
 def _run(cmd, out_file=None, timeout=120, cwd=None):
     """Run a command. Print warning if binary missing. Return stdout+stderr string."""
     if not _has(cmd[0]):
@@ -624,6 +682,7 @@ def build_reports(findings, loot, data, cfg):
 # ---------------------------------------------------------------------------
 def main():
     print(C.RED + BANNER + C.RESET)
+    check_and_install_tools()
     cfg = wizard()
 
     _section("PHASE 2 - Enumeration")
