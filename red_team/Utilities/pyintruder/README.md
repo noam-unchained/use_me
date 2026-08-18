@@ -36,17 +36,25 @@ results window.
 
 ## Install
 
-Requires Python 3.9+.
+Requires Python 3.9+ (already installed on most machines). You only need to install one
+package — `httpx` (with its HTTP/2 extra).
+
+**macOS / Linux** — in the Terminal:
 
 ```bash
-pip install 'httpx[http2]'
+pip3 install 'httpx[http2]'
 ```
 
-or
+**Windows** — in CMD or PowerShell:
 
-```bash
-pip install -r requirements.txt
+```bat
+pip install "httpx[http2]"
 ```
+
+> If `pip3` / `pip` isn't found, install Python from [python.org](https://www.python.org/downloads/)
+> (on Windows, tick **"Add Python to PATH"** during setup), then re-run the command.
+
+Alternatively, from the project folder: `pip install -r requirements.txt`
 
 ---
 
