@@ -476,7 +476,9 @@ input#q{min-width:150px}input#resp{min-width:180px}input#statusf{width:90px}
 .checks{display:flex;gap:14px;align-items:center;margin-left:4px}
 .checks label{color:#aab2bd;display:flex;gap:5px;align-items:center;cursor:pointer;font-size:12px}
 #count{margin-left:auto;color:#7f8894;font-size:12px;white-space:nowrap}
-.wrap{overflow-x:auto}
+/* NOTE: no overflow here — overflow-x:auto also makes overflow-y:auto, which
+   turns this into the scroll container and breaks the sticky header. */
+.wrap{width:100%}
 table{border-collapse:collapse;width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 th,td{padding:6px 12px;text-align:left;border-bottom:1px solid #1e232b;white-space:nowrap}
 th{position:sticky;top:52px;z-index:2;background:#181b21;cursor:pointer;user-select:none;color:#aab2bd;font-weight:600}
@@ -659,6 +661,16 @@ document.querySelectorAll("th").forEach(th=>th.onclick=()=>{
 });
 ["q","resp","statusf"].forEach(id=>el(id).oninput=render);
 ["respMode","anom","grep"].forEach(id=>el(id).onchange=render);
+// The filter bar wraps on narrow widths, so its height varies. Pin the sticky
+// column header exactly to the bar's real height so it never sits on a row.
+function syncStickyTop(){
+  const bar=document.querySelector(".bar"); if(!bar) return;
+  const h=Math.round(bar.getBoundingClientRect().height);
+  document.querySelectorAll("#t thead th").forEach(th=>{ th.style.top=h+"px"; });
+}
+window.addEventListener("resize", syncStickyTop);
+window.addEventListener("load", syncStickyTop);
+syncStickyTop();
 render();
 </script></body></html>"""
 
