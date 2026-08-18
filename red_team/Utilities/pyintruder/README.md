@@ -9,7 +9,7 @@ Burp Community caps Intruder at roughly **1 request per second**. PyIntruder use
 then writes an **interactive HTML report** that looks and filters like the Intruder
 results window.
 
-> ⚠️ **For authorized testing only** — your own labs, CTFs, or engagements you have
+> **For authorized testing only** — your own labs, CTFs, or engagements you have
 > written permission to test.
 
 ---
@@ -106,7 +106,9 @@ python3 pyintruder.py --request request.txt
 
 6. **Optional: session re-login** (see below).
 
-7. The **HTML report opens automatically** in your browser.
+7. The **HTML report opens automatically** in your browser. Every report is saved into a
+   `results/` folder (created automatically) with a timestamped filename, so runs never
+   overwrite each other.
 
 ---
 

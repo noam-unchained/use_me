@@ -720,7 +720,10 @@ def write_report(results, meta, out_path, req_ctx):
                 .replace("__HDRS__", js_json(hdrs))
                 .replace("__COOKIES__", js_json(cookies))
                 .replace("__META__", html.escape(meta)))
-    Path(out_path).write_text(html_doc, encoding="utf-8")
+    out = Path(out_path)
+    if out.parent != Path(""):
+        out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(html_doc, encoding="utf-8")
 
 
 # --------------------------------------------------------------------------- #
@@ -959,7 +962,7 @@ def build_config():
         trigger_rx = re.compile(trg) if trg else None
         refresh = Refresh(refresh_reqs, extractors, req["headers"].get("Cookie", ""))
 
-    default_out = f"pyintruder_results_{time.strftime('%Y%m%d-%H%M%S')}.html"
+    default_out = str(Path("results") / f"pyintruder_results_{time.strftime('%Y%m%d-%H%M%S')}.html")
     out = ask("output HTML file", default_out)
 
     return {
