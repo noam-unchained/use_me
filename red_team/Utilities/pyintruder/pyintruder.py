@@ -187,6 +187,23 @@ def build(tokens, assignment):
 # --------------------------------------------------------------------------- #
 # Attack job generation
 # --------------------------------------------------------------------------- #
+def count_jobs(attack, n_markers, payload_sets):
+    """How many requests an attack will produce — computed WITHOUT building the
+    list, so we can warn/abort before a huge cluster hangs the machine."""
+    if attack == "battering":
+        return len(payload_sets[0])
+    if attack == "sniper":
+        return n_markers * len(payload_sets[0])
+    if attack == "pitchfork":
+        return min(len(s) for s in payload_sets)
+    if attack == "cluster":
+        total = 1
+        for s in payload_sets:
+            total *= len(s)
+        return total
+    return 0
+
+
 def make_jobs(attack, n_markers, originals, payload_sets):
     """
     Yield (assignment_list, label) tuples.
@@ -922,10 +939,21 @@ def build_config():
     else:
         payload_sets = [get_payload_list(f"for position {i}") for i in range(n_markers)]
 
-    jobs = make_jobs(attack, n_markers, originals, payload_sets)
-    if len(jobs) > 200000:
-        if not ask_yes(f"That is {len(jobs):,} requests. Continue?", False):
+    # Work out how many requests this will be BEFORE building the list — a
+    # cluster of two 0-9999 ranges is 100,000,000 combinations, and just
+    # materialising that would hang the machine.
+    total_jobs = count_jobs(attack, n_markers, payload_sets)
+    print(f"\nThat will send {total_jobs:,} requests.")
+    HARD_CAP = 1_000_000
+    if total_jobs > HARD_CAP:
+        print(f"[!] That is too many to run (cap {HARD_CAP:,}).")
+        print("    Tip: for logins, load the lab's candidate wordlists (option [2])")
+        print("    instead of full number ranges — two ~100-line lists = ~10,000 requests.")
+        sys.exit("Aborted — reduce your payloads and run again.")
+    if total_jobs > 200000:
+        if not ask_yes("That's a lot — continue?", False):
             sys.exit("Aborted.")
+    jobs = make_jobs(attack, n_markers, originals, payload_sets)
     # How many chars of each response body to keep for the side panel + search.
     # Keep this generous: the difference between a "wrong" and a "correct" page
     # often sits a few KB into the body, and truncating it away makes every row
