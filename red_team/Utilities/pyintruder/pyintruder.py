@@ -805,13 +805,17 @@ def choose_attack(n_markers):
 
 
 def pick_file():
-    """Open a native file chooser when possible; otherwise ask for a path."""
+    """Open a native file chooser (starting in the current folder) when
+    possible; otherwise ask for a path."""
+    start = str(Path.cwd())
     if sys.platform == "darwin":
         try:
-            out = subprocess.run(
-                ["osascript", "-e",
-                 'POSIX path of (choose file with prompt "Select a wordlist")'],
-                capture_output=True, text=True, timeout=180)
+            # escape for embedding in the AppleScript string literal
+            loc = start.replace("\\", "\\\\").replace('"', '\\"')
+            script = ('POSIX path of (choose file with prompt "Select a wordlist" '
+                      f'default location (POSIX file "{loc}"))')
+            out = subprocess.run(["osascript", "-e", script],
+                                 capture_output=True, text=True, timeout=180)
             p = out.stdout.strip()
             if p:
                 print(f"  selected: {p}")
@@ -823,7 +827,7 @@ def pick_file():
             import tkinter
             from tkinter import filedialog
             root = tkinter.Tk(); root.withdraw()
-            p = filedialog.askopenfilename(title="Select a wordlist")
+            p = filedialog.askopenfilename(title="Select a wordlist", initialdir=start)
             root.destroy()
             if p:
                 print(f"  selected: {p}")
