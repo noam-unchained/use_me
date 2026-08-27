@@ -34,37 +34,39 @@ results window.
 
 ---
 
-## Install
+## Install & run
 
-Requires Python 3.9+ (already installed on most machines). You only need to install one
-package — `httpx` (with its HTTP/2 extra).
+Requires Python 3.9+ (already installed on most machines). The only dependency is `httpx`.
+Each block below **installs the dependency, downloads the script, and runs it** — copy the
+whole block into your terminal.
 
-**macOS / Linux** — in the Terminal:
-
+**macOS**
 ```bash
 pip3 install 'httpx[http2]'
-```
-
-**Windows** — in CMD or PowerShell:
-
-```bat
-pip install "httpx[http2]"
-```
-
-> If `pip3` / `pip` isn't found, install Python from [python.org](https://www.python.org/downloads/)
-> (on Windows, tick **"Add Python to PATH"** during setup), then re-run the command.
-
-Alternatively, from the project folder: `pip install -r requirements.txt`
-
----
-
-## Quick start
-
-```bash
+curl -O https://raw.githubusercontent.com/noam-unchained/use_me/main/red_team/Utilities/pyintruder/pyintruder.py
 python3 pyintruder.py
 ```
 
-You'll be walked through it interactively. You can also pass the request from a file:
+**Windows** (CMD or PowerShell — first install Python from
+[python.org](https://www.python.org/downloads/) and tick *"Add Python to PATH"*)
+```bat
+pip install "httpx[http2]"
+curl -O https://raw.githubusercontent.com/noam-unchained/use_me/main/red_team/Utilities/pyintruder/pyintruder.py
+python pyintruder.py
+```
+
+**Linux / Kali**
+```bash
+pip install 'httpx[http2]' --break-system-packages
+curl -O https://raw.githubusercontent.com/noam-unchained/use_me/main/red_team/Utilities/pyintruder/pyintruder.py
+python3 pyintruder.py
+```
+
+> On Kali, `--break-system-packages` gets past the PEP 668 block. If you prefer to keep the
+> system clean, use a venv instead: `python3 -m venv ~/pyi && source ~/pyi/bin/activate`,
+> then `pip install 'httpx[http2]'`.
+
+The tool then walks you through it interactively. You can also pass the request from a file:
 
 ```bash
 python3 pyintruder.py --request request.txt
