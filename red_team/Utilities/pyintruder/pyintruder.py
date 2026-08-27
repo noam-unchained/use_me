@@ -463,6 +463,18 @@ async def run_attack(cfg):
           + (f" — flagged {len(alerted)} kind(s) of anomaly during the run"
              if alerted else " — no anomalies stood out"))
 
+    # If requests failed to connect, say so loudly — otherwise the report is
+    # just a wall of zeros with no explanation.
+    errored = [r for r in results if r["error"]]
+    if errored:
+        print(f"[!] {len(errored)}/{len(results)} request(s) errored (no response).")
+        print(f"    example error: {errored[0]['error']}")
+        if len(errored) == len(results):
+            print("    EVERY request failed — check that the target is reachable and that")
+            print(f"    the scheme is right (currently {cfg['scheme']}://{cfg['host']}).")
+            print("    Tip: local apps like Juice Shop are usually http, not https"
+                  " (re-run, or pass --scheme http).")
+
     await client.aclose()
     for i, r in enumerate(results):
         r["id"] = i + 1
@@ -511,6 +523,10 @@ td.err{color:#ff6b6b}
 .badge{padding:1px 7px;border-radius:4px;font-size:11px}
 .s2{background:#1f3b1f;color:#8fe28f}.s3{background:#3b331f;color:#ffd166}
 .s4{background:#3b1f1f;color:#ff9b9b}.s5{background:#3b1f36;color:#ff9bd1}
+.badge.err{background:#3a1414;color:#ff8f8f}
+tr.errrow td{background:#241414}
+tr.errrow td.payload{color:#ff9b9b}
+td .err,td.err{color:#ff8f8f}
 tbody tr{cursor:pointer}
 tbody tr:hover td{background:#20262f}
 .hint{color:#6f7883;font-size:12px;margin:10px 18px}
@@ -618,10 +634,17 @@ function render(){
   for(const r of shown){
     const tr=document.createElement("tr");
     tr.dataset.id=r.id;
-    if(r.matched) tr.className="match"; else if(isAnom(r)) tr.className="anom";
+    if(r.error) tr.className="errrow";
+    else if(r.matched) tr.className="match"; else if(isAnom(r)) tr.className="anom";
+    const statusCell = r.error
+      ? `<span class="badge err" title="${escapeHtml(r.error)}">ERR</span>`
+      : sBadge(r.status);
+    const lastCell = r.error
+      ? `<span class="err">${escapeHtml(r.error)}</span>`
+      : escapeHtml(r.redirect||"");
     tr.innerHTML=`<td>${r.id}</td><td class="payload">${escapeHtml(r.payload)}</td>`+
-      `<td>${sBadge(r.status)}</td><td>${r.length}</td><td>${r.words}</td>`+
-      `<td>${r.time_ms}</td><td>${escapeHtml(r.redirect||"")}</td>`;
+      `<td>${statusCell}</td><td>${r.length}</td><td>${r.words}</td>`+
+      `<td>${r.time_ms}</td><td>${lastCell}</td>`;
     frag.appendChild(tr);
   }
   tb.appendChild(frag);
@@ -873,10 +896,23 @@ def build_config():
     if not req["host"]:
         req["host"] = ask("Host (no Host header found)")
 
-    scheme = "https"
+    # scheme: --scheme wins; otherwise infer from the Origin/Referer header
+    # (so http targets like a local Juice Shop on :3000 aren't hit over https);
+    # if neither is available, ask (default https).
+    scheme = None
     for i, a in enumerate(sys.argv):
         if a == "--scheme" and i + 1 < len(sys.argv):
             scheme = sys.argv[i + 1]
+    if not scheme:
+        for k, v in req["headers"].items():
+            if k.lower() in ("origin", "referer"):
+                m = re.match(r"\s*(https?)://", v)
+                if m:
+                    scheme = m.group(1)
+                    print(f"[*] Using scheme '{scheme}' (detected from the {k} header).")
+                    break
+    if not scheme:
+        scheme = ask("scheme — http or https", "https")
 
     # 2. auto-mark + confirm loop
     base_path, query = split_query(req["path"])
