@@ -24,6 +24,8 @@ results window.
 - **Concurrency + optional rate limit** so you can go fast *or* stay gentle on a target.
 - **Live anomaly alerts**: learns a baseline from the first responses and prints a highlighted
   alert (with a terminal bell) the moment an outlier appears — without pausing the run.
+- **Evasion**: rotate a spoofed IP header (`X-Forwarded-For` and friends) to bypass IP-based
+  brute-force blocks, and/or rotate the `User-Agent`, each on its own cadence.
 - **Session re-login / refresh** for apps that log you out mid brute-force, including
   **CSRF-token extraction** via `{{PLACEHOLDER}}` + regex — fully generic.
 - **HTTP/2** support (falls back to HTTP/1.1 automatically).
@@ -167,6 +169,23 @@ whenever a response matches the trigger it silently re-runs the login sequence, 
 cookies/tokens, and **retries the same payload** so nothing is skipped.
 
 ---
+
+## Evasion (IP + User-Agent rotation)
+
+At the end of setup you're offered two independent rotations:
+
+- **Spoofed IP header** — bypasses apps that trust a forwarding header for rate-limiting.
+  Pick which header(s) to spoof: `[1]` `X-Forwarded-For` (classic), `[2]` `X-Real-IP`, or
+  `[3]` all common IP headers at once (best odds — you don't know which one the app trusts).
+  A random public IP is injected, changing every N requests. **Use `1` (every request)** to
+  beat a per-IP counter — if the block trips after 3 tries, sharing an IP across requests
+  gets you blocked.
+- **User-Agent** — cycles through 15 real browser UAs, changing every N requests.
+
+Both are off by default and fully independent. This does **not** change your real source IP —
+it only sets headers, so it works against apps that trust those headers (many do, and the
+PortSwigger IP-block labs are built for exactly this). For genuinely different source IPs,
+route through a proxy instead.
 
 ## Routing through Burp (proxy)
 

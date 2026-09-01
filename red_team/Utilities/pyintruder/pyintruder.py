@@ -20,6 +20,7 @@ import asyncio
 import html
 import itertools
 import json
+import random
 import re
 import subprocess
 import sys
@@ -34,6 +35,50 @@ except ImportError:
 
 
 MARK = "§"  # § , same marker Burp uses
+
+# Real browser User-Agents to cycle through (evasion / fingerprint variety).
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    "Mozilla/5.0 (iPad; CPU OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 OPR/111.0.0.0",
+]
+
+# Preset IP-spoofing header sets (menu 1/2/3).
+IP_HEADER_SETS = {
+    "1": ["X-Forwarded-For"],
+    "2": ["X-Real-IP"],
+    "3": ["X-Forwarded-For", "X-Real-IP", "X-Client-IP", "True-Client-IP", "Client-IP"],
+}
+
+
+def random_public_ip():
+    """A random, plausible, public IPv4 (skips private/reserved ranges)."""
+    while True:
+        a = random.randint(1, 223)
+        if a in (10, 127):
+            continue
+        b = random.randint(0, 255)
+        if a == 172 and 16 <= b <= 31:
+            continue
+        if a == 192 and b == 168:
+            continue
+        if a == 169 and b == 254:
+            continue
+        if a == 100 and 64 <= b <= 127:  # CGNAT
+            continue
+        return f"{a}.{b}.{random.randint(0, 255)}.{random.randint(1, 254)}"
 
 
 # --------------------------------------------------------------------------- #
@@ -393,7 +438,27 @@ async def run_attack(cfg):
                 state["cookie"] = cookie
                 state["values"] = values
 
-    async def do_job(assignment, label):
+    ip_cache = {}
+
+    def evasion_headers(idx):
+        """Rotating spoofed-IP and/or User-Agent headers for this request index.
+        Values change every N requests (bucket = idx // N), so the same bucket
+        shares one IP even under concurrency."""
+        extra, ip = {}, ""
+        if cfg["ip_headers"]:
+            bucket = idx // cfg["ip_every"]
+            ip = ip_cache.get(bucket)
+            if ip is None:
+                ip = random_public_ip()
+                ip_cache[bucket] = ip
+            for h in cfg["ip_headers"]:
+                extra[h] = ip
+        if cfg["ua_list"]:
+            ua = cfg["ua_list"][(idx // cfg["ua_every"]) % len(cfg["ua_list"])]
+            extra["User-Agent"] = ua
+        return extra, ip
+
+    async def do_job(idx, assignment, label):
         nonlocal done
         async with sem:
             if rate:
@@ -401,7 +466,9 @@ async def run_attack(cfg):
             record = {"payload": label, "status": 0, "length": 0, "words": 0,
                       "time_ms": 0, "matched": False, "redirect": "", "error": "",
                       "path": "", "reqbody": "", "cookie": "",
-                      "respbody": "", "resphdrs": ""}
+                      "respbody": "", "resphdrs": "", "xff": ""}
+            extra, xff = evasion_headers(idx)
+            record["xff"] = xff
             for attempt in range(3):
                 async with state_lock:
                     cookie = state["cookie"]
@@ -409,6 +476,7 @@ async def run_attack(cfg):
                 path, body = render_request(assignment, values)
                 url = f"{cfg['scheme']}://{cfg['host']}{path}"
                 headers = clean_headers(cfg["headers"], cookie=cookie)
+                headers.update(extra)  # spoofed IP / rotated User-Agent
                 record["path"] = path
                 record["reqbody"] = body
                 record["cookie"] = cookie
@@ -457,7 +525,7 @@ async def run_attack(cfg):
 
     print(f"[*] Firing {total} requests (concurrency={cfg['concurrency']})...")
     t0 = time.perf_counter()
-    await asyncio.gather(*(do_job(a, l) for a, l in cfg["jobs"]))
+    await asyncio.gather(*(do_job(i, a, l) for i, (a, l) in enumerate(cfg["jobs"])))
     elapsed = time.perf_counter() - t0
     print(f"\n[*] Done in {elapsed:.1f}s"
           + (f" — flagged {len(alerted)} kind(s) of anomaly during the run"
@@ -665,6 +733,8 @@ function escapeHtml(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"
 function reqText(r){
   const L=[`${REQ.method} ${r.path} HTTP/${REQ.httpver}`, `Host: ${REQ.host}`];
   for(const [k,v] of REQ.headers){ if(k.toLowerCase()==="cookie") continue; L.push(`${k}: ${v}`); }
+  // spoofed IP header(s) actually sent for this request
+  if(r.xff && REQ.ipHeaders) for(const h of REQ.ipHeaders) L.push(`${h}: ${r.xff}`);
   const ck=cookieOf(r); if(ck) L.push(`Cookie: ${ck}`);
   L.push(""); L.push(r.reqbody||"");
   return L.join("\n");
@@ -1042,6 +1112,23 @@ def build_config():
         trigger_rx = re.compile(trg) if trg else None
         refresh = Refresh(refresh_reqs, extractors, req["headers"].get("Cookie", ""))
 
+    # 8. evasion — rotate a spoofed IP header and/or the User-Agent
+    ip_headers, ip_every = [], 1
+    if ask_yes("\nRotate a spoofed IP header to bypass IP-based blocks?", False):
+        print("  Which IP header to spoof?")
+        print("    [1] X-Forwarded-For  (classic, most common)")
+        print("    [2] X-Real-IP")
+        print("    [3] all common IP headers at once (best chance to bypass)")
+        ip_headers = IP_HEADER_SETS.get(ask("  choice", "1"), IP_HEADER_SETS["1"])
+        ip_every = max(1, ask_int("  change the IP every how many requests?", 1))
+        print(f"  -> spoofing {', '.join(ip_headers)} with a random IP every {ip_every} request(s)")
+
+    ua_list, ua_every = [], 1
+    if ask_yes("\nRotate the User-Agent?", False):
+        ua_every = max(1, ask_int("  change the User-Agent every how many requests?", 1))
+        ua_list = USER_AGENTS
+        print(f"  -> cycling {len(ua_list)} User-Agents every {ua_every} request(s)")
+
     default_out = str(Path("results") / f"pyintruder_results_{time.strftime('%Y%m%d-%H%M%S')}.html")
     out = ask("output HTML file", default_out)
 
@@ -1055,6 +1142,8 @@ def build_config():
         "body_cap": body_cap,
         "grep_rx": grep_rx, "refresh": refresh,
         "trigger_codes": trigger_codes, "trigger_rx": trigger_rx,
+        "ip_headers": ip_headers, "ip_every": ip_every,
+        "ua_list": ua_list, "ua_every": ua_every,
         "out": out,
     }
 
@@ -1074,6 +1163,7 @@ def main():
         "httpver": "2" if cfg["http2"] else "1.1",
         "headers": [[k, v] for k, v in cfg["headers"].items()
                     if k.lower() not in _DROP_HEADERS and k.lower() != "cookie"],
+        "ipHeaders": cfg["ip_headers"],
     }
     write_report(results, meta, cfg["out"], req_ctx)
     print(f"[+] Report written to {cfg['out']}")
