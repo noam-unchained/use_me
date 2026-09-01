@@ -9,6 +9,7 @@ Nothing here is phase-specific — these are things you reach for throughout an 
 | Tool | Purpose |
 |------|---------|
 | [encoder-decoder](encoder-decoder/) | Encode and decode data in base64, hex, URL, XOR, and more |
+| [pyintruder](pyintruder/) | Fast Burp-Intruder-style web fuzzer with an interactive HTML report |
 | [hash-cracker](hash-cracker/) | Crack hashes using wordlists and brute-force |
 | [password-auditor](password-auditor/) | Audit password strength and check against common lists |
 | [log-cleaner](log-cleaner/) | Clear system logs and shell history to remove traces |
