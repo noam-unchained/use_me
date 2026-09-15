@@ -21,6 +21,8 @@ results window.
 - **4 attack types**: `sniper`, `battering ram`, `pitchfork`, `cluster bomb` (with a built-in
   `?` explainer for each).
 - **Payloads**: number range (e.g. `0000`–`9999`), wordlist file, or an inline list.
+- **Bundled payload wordlists** (`payloads/`) for XSS, SQLi, SSTI, NoSQL, command injection, LFI, XXE, SSRF, open redirect, CRLF, XPath and LDAP — each opens with a **canary** probe so real hits stand out (see below). Wordlist files may use `#` comment lines to label payloads (skipped on load; a lone `#` is still sent).
+- **`?` help anywhere**: type `?` at (almost) any prompt for a one-line explanation of that question.
 - **Concurrency + optional rate limit** so you can go fast *or* stay gentle on a target.
 - **Live anomaly alerts**: learns a baseline from the first responses and prints a highlighted
   alert (with a terminal bell) the moment an outlier appears — without pausing the run.
@@ -119,7 +121,7 @@ python3 pyintruder.py --request request.txt
 6. **Optional: session re-login** (see below).
 
 7. The **HTML report opens automatically** in your browser. Every report is saved into a
-   `results/` folder (created automatically) with a timestamped filename, so runs never
+   `results_not_public/` folder (created automatically) with a timestamped filename, so runs never
    overwrite each other.
 
 ---
@@ -141,6 +143,46 @@ The report mirrors Burp's Intruder results window, but interactive:
 Redirects are **not** followed (just like Intruder), so a logout/success `302` is visible.
 
 ---
+
+## Bundled payload wordlists (`payloads/`)
+
+Ready-to-fire lists for a single injection point, one per web-attack class — load one as the
+wordlist (option `[2]`):
+
+| File | Attack | File | Attack |
+|------|--------|------|--------|
+| `xss.txt` | XSS | `xxe.txt` | XXE |
+| `sqli.txt` | SQL injection | `ssrf.txt` | SSRF |
+| `ssti.txt` | template injection | `open-redirect.txt` | open redirect |
+| `nosql.txt` | NoSQL injection | `crlf.txt` | CRLF / response split |
+| `command-injection.txt` | OS command injection | `xpath.txt` | XPath injection |
+| `lfi.txt` | LFI / RFI | `ldap.txt` | LDAP injection |
+
+Every file:
+
+- **Opens with a `canary` section** — probes carrying a rare token (`xq9z`) or a deterministic
+  signal (an echoed token, a math result, a `/etc/passwd` signature, a `~5s` time delay, or an
+  OOB callback). Set the grep to that token so **only real reflections/executions get flagged**
+  — HTTP 200 alone is never a hit.
+- Uses `#` **comment lines** to label each block (skipped on load; a lone `#` is still sent).
+- Is **transmit-safe raw** — characters that would break a raw query (`&`, `#`, `+`) are
+  pre-encoded, so every payload arrives intact.
+
+See `payloads/INJECTION-PAYLOADS.md` for the full per-attack detection guide.
+
+## Practice target — `xss_lab.py`
+
+A tiny, intentionally-vulnerable local server for testing the wordlists + canary flow safely
+(binds to `127.0.0.1` only — Ctrl-C to stop):
+
+```bash
+python3 xss_lab.py 8000
+# then attack e.g.  http://127.0.0.1:8000/reflect?q=FUZZ  with payloads/xss.txt, grep = xq9z
+```
+
+Its endpoints cover HTML-text, attribute, JS-string, href and a *filtered* context, plus a
+**safe** (HTML-encoded) one — so you watch the canary flag the vulnerable contexts and stay
+quiet on the safe one (even though every response is still `200`).
 
 ## Session re-login / refresh (advanced)
 

