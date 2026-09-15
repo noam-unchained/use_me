@@ -170,20 +170,6 @@ Every file:
 
 See `payloads/INJECTION-PAYLOADS.md` for the full per-attack detection guide.
 
-## Practice target — `xss_lab.py`
-
-A tiny, intentionally-vulnerable local server for testing the wordlists + canary flow safely
-(binds to `127.0.0.1` only — Ctrl-C to stop):
-
-```bash
-python3 xss_lab.py 8000
-# then attack e.g.  http://127.0.0.1:8000/reflect?q=FUZZ  with payloads/xss.txt, grep = xq9z
-```
-
-Its endpoints cover HTML-text, attribute, JS-string, href and a *filtered* context, plus a
-**safe** (HTML-encoded) one — so you watch the canary flag the vulnerable contexts and stay
-quiet on the safe one (even though every response is still `200`).
-
 ## Session re-login / refresh (advanced)
 
 Some apps (including several PortSwigger labs) **invalidate your session** after a few failed
