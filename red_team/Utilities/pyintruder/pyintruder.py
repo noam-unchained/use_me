@@ -130,28 +130,37 @@ def section(title):
 
 
 def banner():
-    """Noam Unchained penguin banner (penguin colours: white body, orange beak/feet)."""
+    """Noam Unchained banner: a bunny (left) says 'OFC ;)' to the penguin (right),
+    who warns 'AUTHORIZED TESTING ONLY !!!'. Feet share one baseline; the bunny's
+    head stays below the penguin's."""
     tty = sys.stdout.isatty()
     E = chr(27)
     def c(code, text):
         return f"{E}[{code}m{text}{E}[0m" if tty else text
-    W = "1;97"        # bright white  (body)
+    R = "1;91"        # red           (authorized-testing warning)
+    G = "1;92"        # green         (bunny 'OFC ;)' bubble)
+    W = "1;97"        # bright white  (penguin body)
     O = "38;5;208"    # orange        (beak + feet)
-    T = "1;96"        # bold cyan     (title / bubble)
-    P = "38;5;218"    # soft pink     (belly accent)
+    T = "1;96"        # bold cyan     (name / tails)
+    P = "38;5;218"    # soft pink     (bunny + belly accent)
+    def cell(plain, code):
+        # colour a left-hand (bunny) segment and pad to a fixed 16-col gutter
+        return c(code, plain) + " " * (16 - len(plain))
+    SP = " " * 16
     print()
-    print(c(T, "    .----------------------."))
-    print(c(T, "   (   Noam  Unchained      )"))
-    print(c(T, "    '----------------------'"))
-    print(c(T, "                           o"))
-    print(c(T, "                            o"))
-    print(c(W, "                          .----."))
-    print(c(W, "                         ( o  o )"))
-    print(c(W, "                         (  ") + c(O, ">") + c(W, "   )"))
-    print(c(W, "                        (| ") + c(P, ".--.") + c(W, " |)"))
-    print(c(W, "                        (| ") + c(P, "|  |") + c(W, " |)"))
-    print(c(W, "                        (| ") + c(P, "'--'") + c(W, " |)"))
-    print(c(W, "                         ") + c(O, "(_)  (_)"))
+    print(SP        + c(R, "    .--------------------."))
+    print(SP        + c(R, "   (  AUTHORIZED         )"))
+    print(SP        + c(R, "   (  TESTING ONLY !!!   )"))
+    print(SP        + c(R, "    '--------------------'"))
+    print(cell(".-----------.", G) + c(T, "                 o"))
+    print(cell("(  OFC ...  )", G) + c(T, "                  o"))
+    print(cell("'-----------'", G) + c(W, "                .----."))
+    print(cell("     o", G)       + c(W, "               ( o  o )"))
+    print(cell("    o", G)        + c(W, "               (  ") + c(O, ">") + c(W, "   )"))
+    print(cell("  n_n", P)        + c(W, "              (| ") + c(P, ".--.") + c(W, " |)"))
+    print(cell(" (-.-)", P)       + c(W, "              (| ") + c(P, "|  |") + c(W, " |)"))
+    print(cell("  >o<", P)        + c(W, "              (| ") + c(P, "'--'") + c(W, " |)"))
+    print(cell(' (")_(")', P)     + c(W, "               ") + c(O, "(_)  (_)") + c(T, "        ~ Noam Unchained ~"))
     print()
 
 
