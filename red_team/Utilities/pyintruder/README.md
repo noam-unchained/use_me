@@ -144,6 +144,26 @@ Redirects are **not** followed (just like Intruder), so a logout/success `302` i
 
 ---
 
+## Directory discovery (dir-busting)
+
+PyIntruder doubles as a fast content-discovery tool (Burp Pro's *Discover content*,
+missing from Community). Paste a GET request with a placeholder folder in the path, choose
+**manual** marking, and mark that folder:
+
+```
+GET /FUZZ HTTP/1.1
+Host: target
+```
+
+Pick a directory wordlist (e.g. SecLists `common.txt`) as the payload. In the report, `404`
+is the baseline — turn on **anomalies only**, or filter the status to `200` / `30` / `403`,
+to see what exists.
+
+Tip: delete any `If-None-Match` / `If-Modified-Since` lines from the pasted request first,
+or existing paths may answer `304 Not Modified`.
+
+---
+
 ## Bundled payload wordlists (`payloads/`)
 
 Ready-to-fire lists for a single injection point, one per web-attack class — load one as the
