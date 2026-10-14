@@ -130,37 +130,28 @@ def section(title):
 
 
 def banner():
-    """Noam Unchained banner: a bunny (left) says 'OFC ;)' to the penguin (right),
-    who warns 'AUTHORIZED TESTING ONLY !!!'. Feet share one baseline; the bunny's
-    head stays below the penguin's."""
+    """Noam Unchained penguin banner (penguin colours: white body, orange beak/feet)."""
     tty = sys.stdout.isatty()
     E = chr(27)
     def c(code, text):
         return f"{E}[{code}m{text}{E}[0m" if tty else text
-    R = "1;91"        # red           (authorized-testing warning)
-    G = "1;92"        # green         (bunny 'OFC ;)' bubble)
-    W = "1;97"        # bright white  (penguin body)
+    W = "1;97"        # bright white  (body)
     O = "38;5;208"    # orange        (beak + feet)
-    T = "1;96"        # bold cyan     (name / tails)
-    P = "38;5;218"    # soft pink     (bunny + belly accent)
-    def cell(plain, code):
-        # colour a left-hand (bunny) segment and pad to a fixed 16-col gutter
-        return c(code, plain) + " " * (16 - len(plain))
-    SP = " " * 16
+    T = "1;96"        # bold cyan     (title / bubble)
+    P = "38;5;218"    # soft pink     (belly accent)
     print()
-    print(SP        + c(R, "    .--------------------."))
-    print(SP        + c(R, "   (  AUTHORIZED         )"))
-    print(SP        + c(R, "   (  TESTING ONLY !!!   )"))
-    print(SP        + c(R, "    '--------------------'"))
-    print(cell(".-----------.", G) + c(T, "                 o"))
-    print(cell("(  OFC ...  )", G) + c(T, "                  o"))
-    print(cell("'-----------'", G) + c(W, "                .----."))
-    print(cell("     o", G)       + c(W, "               ( o  o )"))
-    print(cell("    o", G)        + c(W, "               (  ") + c(O, ">") + c(W, "   )"))
-    print(cell("  n_n", P)        + c(W, "              (| ") + c(P, ".--.") + c(W, " |)"))
-    print(cell(" (-.-)", P)       + c(W, "              (| ") + c(P, "|  |") + c(W, " |)"))
-    print(cell("  >o<", P)        + c(W, "              (| ") + c(P, "'--'") + c(W, " |)"))
-    print(cell(' (")_(")', P)     + c(W, "               ") + c(O, "(_)  (_)") + c(T, "        ~ Noam Unchained ~"))
+    print(c(T, "    .----------------------."))
+    print(c(T, "   (   Noam  Unchained      )"))
+    print(c(T, "    '----------------------'"))
+    print(c(T, "                           o"))
+    print(c(T, "                            o"))
+    print(c(W, "                          .----."))
+    print(c(W, "                         ( o  o )"))
+    print(c(W, "                         (  ") + c(O, ">") + c(W, "   )"))
+    print(c(W, "                        (| ") + c(P, ".--.") + c(W, " |)"))
+    print(c(W, "                        (| ") + c(P, "|  |") + c(W, " |)"))
+    print(c(W, "                        (| ") + c(P, "'--'") + c(W, " |)"))
+    print(c(W, "                         ") + c(O, "(_)  (_)"))
     print()
 
 
@@ -1044,6 +1035,7 @@ def build_config():
     # 2. auto-mark + confirm loop
     base_path, query = split_query(req["path"])
     body = req["body"]
+    path_marked_final = base_path
     query_marked_final = None
     body_marked_final = ""
     while True:
@@ -1058,40 +1050,47 @@ def build_config():
         print(f"--- {n} position(s) marked ---")
         choice = ask("Accept these positions? [y]es / [m]anual", "y").lower()
         if choice.startswith("y"):
+            path_marked_final = base_path
             query_marked_final = marked_query
             body_marked_final = marked_body
             break
         # manual: user types exact substrings to mark
         print("Manual mode: copy-paste the EXACT value you want to attack (e.g. 1426).")
         print("Add one per line. Press Enter on an empty line when you're done.")
+        print("(tip: for directory discovery, mark the folder name in the URL path)")
         targets = []
         while True:
             t = input("  value to attack (Enter when done)> ").strip()
             if not t:
                 break
             targets.append(t)
+        mpath = base_path
         mq = query
         mb = body
         for t in targets:
-            if mq and t in mq:
+            if t in mpath:
+                mpath = mpath.replace(t, f"{MARK}{t}{MARK}", 1)
+            elif mq and t in mq:
                 mq = mq.replace(t, f"{MARK}{t}{MARK}", 1)
             elif t in mb:
                 mb = mb.replace(t, f"{MARK}{t}{MARK}", 1)
             else:
-                print(f"  [!] '{t}' not found in query or body")
+                print(f"  [!] '{t}' not found in the path, query or body")
+        path_marked_final = mpath
         query_marked_final = mq
         body_marked_final = mb
         break
 
-    # 3. tokenize (global marker order: query first, then body)
+    # 3. tokenize (global marker order: path, then query, then body)
+    p_tokens, p_orig = tokenize(path_marked_final, 0)
     if query_marked_final:
-        q_tokens, q_orig = tokenize(query_marked_final, 0)
-        path_tokens = [("lit", base_path + "?")] + q_tokens
+        q_tokens, q_orig = tokenize(query_marked_final, len(p_orig))
+        path_tokens = p_tokens + [("lit", "?")] + q_tokens
     else:
         q_orig = []
-        path_tokens = [("lit", base_path)]
-    b_tokens, b_orig = tokenize(body_marked_final or "", len(q_orig))
-    originals = q_orig + b_orig
+        path_tokens = p_tokens
+    b_tokens, b_orig = tokenize(body_marked_final or "", len(p_orig) + len(q_orig))
+    originals = p_orig + q_orig + b_orig
     n_markers = len(originals)
     if n_markers == 0:
         sys.exit("No payload positions marked — nothing to attack.")
